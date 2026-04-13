@@ -340,11 +340,10 @@ def build_prompt(user_text: str, history_text: str, docs_text: str) -> str:
     return (
         f"{BOT_ROLE}\n"
         f"{BOT_EXTRA_RULES}\n\n"
-        "Стиль ответа: 3-6 коротких предложений, дружелюбно и по делу.\n"
-        "Если есть факты во фрагментах, вплетай их в текст естественно.\n"
-        "Не называй конкретные способы, цифры, проценты и API, если этого нет во фрагментах.\n"
-        "Если факт не подтвержден во фрагментах, не отрицай это напрямую, а переведи в менеджерский шаг: уточни вводные и предложи быстро подобрать вариант.\n"
-        "В конце добавляй один конкретный уточняющий вопрос, чтобы продвинуть диалог к запуску.\n\n"
+        "Отвечай только по фрагментам базы знаний ниже.\n"
+        "Не добавляй маркетинговые CTA и не придумывай факты.\n"
+        "Если во фрагментах есть прямое определение, используй его почти дословно.\n"
+        "Стиль ответа: кратко, по делу, 1-4 предложения.\n\n"
         "[Chat history with this user]\n"
         f"{history_text}\n\n"
         "[Knowledge base fragments]\n"
@@ -462,7 +461,26 @@ def query_tokens(text: str) -> list[str]:
     return [p for p in parts if len(p) >= 3 and p not in blacklist]
 
 
-def build_extractive_fallback(user_text: str, results: list[tuple[float, dict[str, Any]]]) -> str:
+def is_definition_query(text: str) -> bool:
+    lowered = (text or "").strip().lower()
+    patterns = (
+        "что такое ",
+        "кто такой ",
+        "кто такая ",
+        "что за ",
+        "define ",
+        "what is ",
+    )
+    return lowered.startswith(patterns)
+
+
+def build_extractive_fallback(
+    user_text: str,
+    results: list[tuple[float, dict[str, Any]]],
+    *,
+    include_cta: bool = True,
+    lead: str = "По вашему запросу вижу рабочие варианты:",
+) -> str:
     if not results:
         return ""
     tokens = query_tokens(user_text)
@@ -502,10 +520,11 @@ def build_extractive_fallback(user_text: str, results: list[tuple[float, dict[st
     snippets = [line for line, _ in lines[:3]]
     if not snippets:
         return ""
-    lead = "По вашему запросу вижу рабочие варианты:"
     body = " ".join(snippets)
     body = re.sub(r"\s+", " ", body).strip()
-    return f"{lead} {body} {SALES_DEFAULT_CTA}"
+    if include_cta:
+        return f"{lead} {body} {SALES_DEFAULT_CTA}"
+    return f"{lead} {body}"
 
 
 def build_sales_manager_fallback(
@@ -524,6 +543,18 @@ def build_sales_manager_fallback(
         "Могу быстро собрать для вас понятный план запуска и монетизации. "
         f"{SALES_DEFAULT_CTA}"
     )
+
+
+def build_docs_grounded_fallback(user_text: str, results: list[tuple[float, dict[str, Any]]]) -> str:
+    extractive = build_extractive_fallback(
+        user_text,
+        results,
+        include_cta=False,
+        lead="По базе знаний:",
+    )
+    if extractive:
+        return extractive
+    return "В базе знаний пока нет точного ответа на этот вопрос."
 
 
 def build_direct_definition_answer(user_text: str, results: list[tuple[float, dict[str, Any]]]) -> str:
@@ -558,10 +589,7 @@ def build_direct_definition_answer(user_text: str, results: list[tuple[float, di
     line = re.sub(r"^[#]+\s*", "", candidates[0]).strip()
     line = re.sub(r"\s+", " ", line).strip()
     line = line.rstrip(" .") + "."
-    return (
-        f"{line} "
-        "Если хотите, подскажу, как это применить в вашей связке и что запускать первым."
-    )
+    return line
 
 
 async def ask_ollama(prompt: str) -> str:
@@ -607,6 +635,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     retrieval_query = user_text
     if history_for_retrieval and is_followup_query(user_text):
         retrieval_query = f"{history_for_retrieval}\n{user_text}"
+    definition_mode = is_definition_query(user_text)
 
     idx = ensure_index()
     raw_results = idx.search(retrieval_query, top_k=max(TOP_K, 8))
@@ -619,8 +648,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     record_question_if_new(update, user_text, key, best_score)
 
+    direct_answer = build_direct_definition_answer(user_text, results)
+    if direct_answer:
+        append_jsonl(
+            QUESTIONS_LOG_FILE,
+            build_question_event(update, user_text, "direct_definition_from_docs", best_score, key),
+        )
+        add_dialog_turn(key, "user", user_text)
+        add_dialog_turn(key, "assistant", direct_answer)
+        elapsed_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+        logger.info(
+            "Answered message key=%s score=%.4f elapsed_ms=%s model=%s route=direct_definition",
+            key,
+            best_score,
+            elapsed_ms,
+            OLLAMA_MODEL,
+        )
+        await update.effective_message.reply_text(direct_answer)
+        return
+
     if best_score < SIMILARITY_THRESHOLD:
-        fallback = build_sales_manager_fallback(user_text, results, low_match=True)
+        fallback = (
+            build_docs_grounded_fallback(user_text, results)
+            if definition_mode
+            else build_sales_manager_fallback(user_text, results, low_match=True)
+        )
         append_jsonl(
             UNANSWERED_LOG_FILE,
             build_question_event(update, user_text, "needs_kb_update_low_match", best_score, key),
@@ -631,7 +683,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if best_score < LOW_CONFIDENCE_MODEL_SCORE:
-        fallback = build_sales_manager_fallback(user_text, results, low_match=True)
+        fallback = (
+            build_docs_grounded_fallback(user_text, results)
+            if definition_mode
+            else build_sales_manager_fallback(user_text, results, low_match=True)
+        )
         append_jsonl(
             UNANSWERED_LOG_FILE,
             build_question_event(update, user_text, "needs_kb_update_low_confidence", best_score, key),
@@ -641,54 +697,55 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text(fallback)
         return
 
-    answer = build_direct_definition_answer(user_text, results)
-    if answer:
+    prompt = build_prompt(
+        user_text=user_text,
+        history_text=get_dialog_history_text(key),
+        docs_text=build_docs_text(results),
+    )
+    answer = await ask_ollama(prompt)
+    if not answer:
+        answer = (
+            build_docs_grounded_fallback(user_text, results)
+            if definition_mode
+            else build_sales_manager_fallback(user_text, results)
+        )
+        if answer:
+            append_jsonl(
+                QUESTIONS_LOG_FILE,
+                build_question_event(
+                    update, user_text, "sales_fallback_after_model_error", best_score, key
+                ),
+            )
+        append_jsonl(
+            UNANSWERED_LOG_FILE,
+            build_question_event(update, user_text, "model_timeout_or_error", best_score, key),
+        )
+    elif is_unknown_answer(answer):
+        answer = (
+            build_docs_grounded_fallback(user_text, results)
+            if definition_mode
+            else build_sales_manager_fallback(user_text, results, low_match=best_score < 0.35)
+        )
         append_jsonl(
             QUESTIONS_LOG_FILE,
-            build_question_event(update, user_text, "direct_definition_from_docs", best_score, key),
+            build_question_event(
+                update, user_text, "sales_override_model_no_answer", best_score, key
+            ),
         )
-    else:
-        prompt = build_prompt(
-            user_text=user_text,
-            history_text=get_dialog_history_text(key),
-            docs_text=build_docs_text(results),
+        append_jsonl(
+            UNANSWERED_LOG_FILE,
+            build_question_event(
+                update, user_text, "needs_kb_update_model_no_answer", best_score, key
+            ),
         )
-        answer = await ask_ollama(prompt)
-        if not answer:
-            answer = build_sales_manager_fallback(user_text, results)
-            if answer:
-                append_jsonl(
-                    QUESTIONS_LOG_FILE,
-                    build_question_event(
-                        update, user_text, "sales_fallback_after_model_error", best_score, key
-                    ),
-                )
-            append_jsonl(
-                UNANSWERED_LOG_FILE,
-                build_question_event(update, user_text, "model_timeout_or_error", best_score, key),
-            )
-        elif is_unknown_answer(answer):
-            answer = build_sales_manager_fallback(user_text, results, low_match=best_score < 0.35)
-            append_jsonl(
-                QUESTIONS_LOG_FILE,
-                build_question_event(
-                    update, user_text, "sales_override_model_no_answer", best_score, key
-                ),
-            )
-            append_jsonl(
-                UNANSWERED_LOG_FILE,
-                build_question_event(
-                    update, user_text, "needs_kb_update_model_no_answer", best_score, key
-                ),
-            )
-        elif contains_unbacked_claims(answer, build_docs_text(results)):
-            # Keep model answer (manager-style UX priority), but record a quality signal.
-            append_jsonl(
-                QUESTIONS_LOG_FILE,
-                build_question_event(
-                    update, user_text, "model_answer_with_unbacked_tokens", best_score, key
-                ),
-            )
+    elif contains_unbacked_claims(answer, build_docs_text(results)):
+        # Keep model answer (manager-style UX priority), but record a quality signal.
+        append_jsonl(
+            QUESTIONS_LOG_FILE,
+            build_question_event(
+                update, user_text, "model_answer_with_unbacked_tokens", best_score, key
+            ),
+        )
 
     add_dialog_turn(key, "user", user_text)
     add_dialog_turn(key, "assistant", answer)
