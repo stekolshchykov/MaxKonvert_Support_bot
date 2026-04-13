@@ -5,10 +5,9 @@ services:
       dockerfile: Dockerfile
     container_name: maxkonvert-bot
     restart: unless-stopped
+    network_mode: host
     env_file:
       - .env.docker
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - ./kb/docs:/app/kb/docs
       - ./kb/questions:/app/kb/questions

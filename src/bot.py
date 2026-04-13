@@ -40,18 +40,20 @@ RETRIEVAL_HISTORY_TURNS = int(os.getenv("RETRIEVAL_HISTORY_TURNS", "2").strip())
 MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "1800").strip())
 MAX_DOC_SNIPPET_CHARS = int(os.getenv("MAX_DOC_SNIPPET_CHARS", "450").strip())
 MAX_DOC_FRAGMENTS = int(os.getenv("MAX_DOC_FRAGMENTS", "3").strip())
+MAX_ANSWER_CHARS = int(os.getenv("MAX_ANSWER_CHARS", "1600").strip())
 BOT_ROLE = os.getenv(
     "BOT_ROLE",
     (
-        "Ты — поддержка партнёрской программы MaxKonvert. "
-        "Отвечай профессионально и кратко, опираясь только на локальную документацию."
+        "Ты — консультант MaxKonvert. "
+        "Роль и факты берёшь только из локальной базы знаний."
     ),
 ).strip()
 BOT_EXTRA_RULES = os.getenv(
     "BOT_EXTRA_RULES",
     (
-        "Если в документации нет подтверждения, прямо скажи об этом. "
-        "Отвечай на языке пользователя. Не выдумывай факты."
+        "Отвечай на языке пользователя. "
+        "Если подтверждения в документации нет — скажи об этом прямо. "
+        "Не выдумывай факты."
     ),
 ).strip()
 
@@ -240,6 +242,9 @@ def build_prompt(user_text: str, history_text: str, docs_text: str) -> str:
     return (
         f"{BOT_ROLE}\n"
         f"{BOT_EXTRA_RULES}\n\n"
+        "Правило ответа: если во фрагментах есть прямой факт по вопросу, обязательно дай этот факт.\n"
+        "Пиши кратко и структурно: 2-6 пунктов.\n"
+        "Добавь в конце строку вида: Источник: <имя файла>.\n\n"
         "[Chat history with this user]\n"
         f"{history_text}\n\n"
         "[Knowledge base fragments]\n"
@@ -271,6 +276,75 @@ def is_unknown_answer(text: str) -> bool:
     return any(marker in lowered for marker in markers)
 
 
+def query_tokens(text: str) -> list[str]:
+    parts = re.findall(r"[a-zа-я0-9]+", (text or "").lower().replace("ё", "е"))
+    blacklist = {
+        "что",
+        "как",
+        "какой",
+        "какие",
+        "есть",
+        "это",
+        "а",
+        "и",
+        "по",
+        "в",
+        "на",
+        "ли",
+        "за",
+        "к",
+        "у",
+        "из",
+        "про",
+        "подскажите",
+        "скажите",
+        "пожалуйста",
+    }
+    return [p for p in parts if len(p) >= 3 and p not in blacklist]
+
+
+def build_extractive_fallback(user_text: str, results: list[tuple[float, dict[str, Any]]]) -> str:
+    if not results:
+        return ""
+    tokens = query_tokens(user_text)
+    lines: list[tuple[str, str]] = []
+    seen = set()
+    for _, payload in results[: max(1, MAX_DOC_FRAGMENTS)]:
+        file_name = payload.get("file", "unknown")
+        text = payload.get("text", "") or ""
+        for raw in re.split(r"[\n\r]+", text):
+            line = raw.strip(" -*\t")
+            if len(line) < 18:
+                continue
+            low = line.lower().replace("ё", "е")
+            if tokens and not any(tok in low for tok in tokens):
+                continue
+            key = normalize_question(line)
+            if key in seen:
+                continue
+            seen.add(key)
+            lines.append((line, file_name))
+            if len(lines) >= 4:
+                break
+        if len(lines) >= 4:
+            break
+
+    # If token filtering is too strict, still return strongest snippets.
+    if not lines:
+        for _, payload in results[:2]:
+            file_name = payload.get("file", "unknown")
+            snippet = (payload.get("text", "") or "").strip().replace("\n", " ")
+            snippet = re.sub(r"\s+", " ", snippet)[:220]
+            if snippet:
+                lines.append((snippet, file_name))
+        if not lines:
+            return ""
+
+    source_files = sorted({f for _, f in lines})
+    bullets = "\n".join(f"- {line}" for line, _ in lines[:4])
+    return f"По документации:\n{bullets}\n\nИсточник: {', '.join(source_files)}"
+
+
 async def ask_ollama(prompt: str) -> str:
     try:
         async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
@@ -283,13 +357,14 @@ async def ask_ollama(prompt: str) -> str:
                     "options": {
                         "temperature": 0.2,
                         "num_ctx": 1536,
-                        "num_predict": 220,
+                        "num_predict": 140,
                     },
                 },
             )
             resp.raise_for_status()
             data = resp.json()
-            return data.get("response", "").strip()
+            answer = data.get("response", "").strip()
+            return answer[:MAX_ANSWER_CHARS]
     except Exception:
         logger.exception("Ollama error")
         return ""
@@ -303,6 +378,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    started = datetime.now(timezone.utc)
     user_text = (update.effective_message.text or "").strip()
     if not user_text:
         return
@@ -344,22 +420,55 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     answer = await ask_ollama(prompt)
     if not answer:
-        answer = (
-            "Не удалось сформировать ответ в заданный лимит времени. "
-            "Повторите запрос или обратитесь в поддержку: https://t.me/MaxKonvert"
-        )
-        append_jsonl(
-            UNANSWERED_LOG_FILE,
-            build_question_event(update, user_text, "model_timeout_or_error", best_score, key),
-        )
+        answer = build_extractive_fallback(user_text, results)
+        if answer:
+            append_jsonl(
+                QUESTIONS_LOG_FILE,
+                build_question_event(
+                    update, user_text, "extractive_fallback_after_model_error", best_score, key
+                ),
+            )
+        else:
+            answer = (
+                "Не удалось сформировать ответ в заданный лимит времени. "
+                "Повторите запрос или обратитесь в поддержку: https://t.me/MaxKonvert"
+            )
+            append_jsonl(
+                UNANSWERED_LOG_FILE,
+                build_question_event(update, user_text, "model_timeout_or_error", best_score, key),
+            )
     elif is_unknown_answer(answer):
-        append_jsonl(
-            UNANSWERED_LOG_FILE,
-            build_question_event(update, user_text, "model_no_answer", best_score, key),
-        )
+        if best_score >= (SIMILARITY_THRESHOLD + 0.08):
+            extractive = build_extractive_fallback(user_text, results)
+            if extractive:
+                answer = extractive
+                append_jsonl(
+                    QUESTIONS_LOG_FILE,
+                    build_question_event(
+                        update, user_text, "extractive_override_model_no_answer", best_score, key
+                    ),
+                )
+            else:
+                append_jsonl(
+                    UNANSWERED_LOG_FILE,
+                    build_question_event(update, user_text, "model_no_answer", best_score, key),
+                )
+        else:
+            append_jsonl(
+                UNANSWERED_LOG_FILE,
+                build_question_event(update, user_text, "model_no_answer", best_score, key),
+            )
 
     add_dialog_turn(key, "user", user_text)
     add_dialog_turn(key, "assistant", answer)
+    elapsed_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+    logger.info(
+        "Answered message key=%s score=%.4f elapsed_ms=%s model=%s",
+        key,
+        best_score,
+        elapsed_ms,
+        OLLAMA_MODEL,
+    )
     await update.effective_message.reply_text(answer)
 
 

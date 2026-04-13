@@ -20,14 +20,16 @@
 mkdir -p kb/docs kb/questions kb/index
 ```
 2. Положи документацию в `kb/docs`.
-3. Скопируй `.env.docker` и заполни `TELEGRAM_TOKEN`:
+3. Скопируй шаблон и заполни `TELEGRAM_TOKEN`:
 ```bash
-cp .env.docker .env
+cp .env.example .env.docker
 ```
 4. Запусти:
 ```bash
 docker compose up -d --build
 ```
+
+Примечание: сервис `bot` работает в `network_mode: host`, чтобы ходить в локальный Ollama на `127.0.0.1:11434` без публикации порта Ollama наружу.
 
 ## Порт и папка знаний
 - Веб-консоль по умолчанию: `http://<host>:8090/`

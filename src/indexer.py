@@ -17,7 +17,21 @@ CHUNK_OVERLAP = 128
 
 
 def split_text(text: str, max_len: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    raw_paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    paragraphs: List[str] = []
+    i = 0
+    while i < len(raw_paragraphs):
+        para = raw_paragraphs[i]
+        # Keep markdown headings together with the next paragraph/list block.
+        if para.startswith("#") and i + 1 < len(raw_paragraphs):
+            nxt = raw_paragraphs[i + 1]
+            combined = f"{para}\n{nxt}"
+            if len(combined) <= (max_len * 2):
+                paragraphs.append(combined)
+                i += 2
+                continue
+        paragraphs.append(para)
+        i += 1
     chunks = []
     for para in paragraphs:
         if len(para) <= max_len:

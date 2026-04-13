@@ -1,75 +1,39 @@
-- generic [active] [ref=e1]:
-  - banner [ref=e2]:
-    - generic [ref=e3]:
-      - link "Удобная система конвертации траффика" [ref=e5] [cursor=pointer]:
-        - /url: /
-        - generic [ref=e7]: Удобная система конвертации траффика
-      - navigation [ref=e8]:
-        - list [ref=e9]:
-          - listitem [ref=e10]:
-            - link "Главная" [ref=e11] [cursor=pointer]:
-              - /url: /
-          - listitem [ref=e12]:
-            - link "Регистрация" [ref=e13] [cursor=pointer]:
-              - /url: "#register"
-          - listitem [ref=e14]:
-            - link "Новости" [ref=e15] [cursor=pointer]:
-              - /url: /news/
-          - listitem [ref=e16]:
-            - link "FAQ" [ref=e17] [cursor=pointer]:
-              - /url: /question/
-          - listitem [ref=e18]:
-            - link "Правила" [ref=e19] [cursor=pointer]:
-              - /url: /rules/
-          - listitem [ref=e20]:
-            - link "Контакты" [ref=e21] [cursor=pointer]:
-              - /url: /contacts/
-          - listitem [ref=e22]:
-            - link "Логин" [ref=e23] [cursor=pointer]:
-              - /url: "#login_block"
-  - generic [ref=e25]:
-    - heading "Правила использования" [level=1] [ref=e26]
-    - generic [ref=e27]:
-      - heading "Запрещено" [level=1] [ref=e28]
-      - paragraph [ref=e29]: "- Использовать наши номера и префиксы на других сайтах;"
-      - paragraph [ref=e30]: "- Сливать трафик, добытый с помощью вредоносных программ;"
-      - paragraph [ref=e31]: "- Регистрироваться под своей реферальной ссылкой;"
-      - paragraph [ref=e32]: "- Самостоятельная подписка номеров абонентов;"
-      - paragraph [ref=e33]: "- Регистрация нескольких аккаунтов"
-      - paragraph [ref=e34]: Администрация имеет право отказать в участии в партнерской программе любому сайту без объяснения причин.
-    - generic [ref=e35]:
-      - heading "Выплаты" [level=1] [ref=e36]
-      - paragraph [ref=e37]: "- Выплаты производятся по четвергам за прошлый период: понедельник - воскресенье"
-  - contentinfo [ref=e38]:
-    - generic [ref=e40]:
-      - generic [ref=e41]:
-        - generic [ref=e42]: ICQ 605515558
-        - generic [ref=e43]: © 2026 MaxKonvert
-        - generic [ref=e44]:
-          - img [ref=e45]
-          - link "MaxKonvert" [ref=e46] [cursor=pointer]:
-            - /url: https://t.me/MaxKonvert
-      - navigation [ref=e47]:
-        - list [ref=e48]:
-          - listitem [ref=e49]:
-            - link "Главная" [ref=e50] [cursor=pointer]:
-              - /url: /
-          - listitem [ref=e51]:
-            - link "Регистрация" [ref=e52] [cursor=pointer]:
-              - /url: "#register"
-          - listitem [ref=e53]:
-            - link "Новости" [ref=e54] [cursor=pointer]:
-              - /url: /news/
-          - listitem [ref=e55]:
-            - link "FAQ" [ref=e56] [cursor=pointer]:
-              - /url: /question/
-          - listitem [ref=e57]:
-            - link "Правила" [ref=e58] [cursor=pointer]:
-              - /url: /rules/
-          - listitem [ref=e59]:
-            - link "Контакты" [ref=e60] [cursor=pointer]:
-              - /url: /contacts/
-  - iframe [ref=e63]:
-    - generic [ref=f5e6]:
-      - text: protected by
-      - strong [ref=f5e7]: reCAPTCHA
+# MaxKonvert — Правила и выплаты
+
+## Правила использования (запрещено)
+
+- Использовать номера и префиксы MaxKonvert на других сайтах.
+- Сливать трафик, добытый с помощью вредоносных программ.
+- Регистрироваться под собственной реферальной ссылкой.
+- Самостоятельно подписывать номера абонентов.
+- Регистрировать несколько аккаунтов (мультиаккаунтинг).
+
+Администрация оставляет за собой право отказать в участии любому сайту без объяснения причин.
+
+## Расписание выплат
+
+- **Периодичность:** каждый четверг.
+- **Период:** прошлая неделя (понедельник — воскресенье).
+- **Минимальная сумма:** отсутствует (по состоянию на дату проверки).
+
+## Способы вывода
+
+- WebMoney (WMR) — подтверждено на сайте.
+- *Не подтверждено напрямую на официальном сайте, но упоминается в сторонних каталогах:* ЮMoney (Яндекс.Деньги), карты, USDT TRC20. Для уточнения актуальных способов рекомендуется обратиться в поддержку.
+
+## Быстрый ответ: какие есть способы вывода
+
+Основной подтверждённый способ вывода: **WebMoney (WMR)**.
+В сторонних каталогах также упоминаются ЮMoney, карты и USDT TRC20, но эти способы нужно уточнять через поддержку.
+
+## Быстрый ответ: правила оплаты и выплат
+
+- Выплаты производятся **каждый четверг**.
+- Расчётный период: **прошлая неделя (понедельник-воскресенье)**.
+- Минимальная сумма выплат: **отсутствует** (по текущей публичной информации).
+
+## Sources
+
+- Правила на официальном сайте: https://maxkv.pw/rules/ (проверено 2026-04-13).
+- FAQ и правила на maxkv.pw: https://maxkv.pw/question/ (проверено 2026-04-13).
+- Каталог партнёрок best-partnerka.ru (способы выплат — не подтверждено официально) (проверено 2026-04-13).
