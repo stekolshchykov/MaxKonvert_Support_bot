@@ -1,0 +1,77 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - link "Удобная система конвертации траффика" [ref=e5] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e7]: Удобная система конвертации траффика
+      - navigation [ref=e8]:
+        - list [ref=e9]:
+          - listitem [ref=e10]:
+            - link "Главная" [ref=e11] [cursor=pointer]:
+              - /url: /
+          - listitem [ref=e12]:
+            - link "Регистрация" [ref=e13] [cursor=pointer]:
+              - /url: "#register"
+          - listitem [ref=e14]:
+            - link "Новости" [ref=e15] [cursor=pointer]:
+              - /url: /news/
+          - listitem [ref=e16]:
+            - link "FAQ" [ref=e17] [cursor=pointer]:
+              - /url: /question/
+          - listitem [ref=e18]:
+            - link "Правила" [ref=e19] [cursor=pointer]:
+              - /url: /rules/
+          - listitem [ref=e20]:
+            - link "Контакты" [ref=e21] [cursor=pointer]:
+              - /url: /contacts/
+          - listitem [ref=e22]:
+            - link "Логин" [ref=e23] [cursor=pointer]:
+              - /url: "#login_block"
+  - generic [ref=e25]:
+    - heading "Контакты для связи" [level=1] [ref=e26]
+    - generic [ref=e27]:
+      - heading "Контактная форма" [level=1] [ref=e28]
+      - generic [ref=e29]:
+        - paragraph [ref=e30]: "Введите свой Email: *"
+        - textbox "mail@mail.com" [ref=e31]
+        - paragraph [ref=e32]: "Тема: *"
+        - textbox "Тема сообщения..." [ref=e33]
+        - paragraph [ref=e34]: "Текс сообщения: *"
+        - textbox [ref=e35]
+        - button "Отправить сообщение" [ref=e36] [cursor=pointer]: Отправить сообщение
+    - generic [ref=e37]:
+      - heading "Или постучите в ICQ" [level=1] [ref=e38]
+      - paragraph [ref=e39]: ICQ 605515558
+  - contentinfo [ref=e40]:
+    - generic [ref=e42]:
+      - generic [ref=e43]:
+        - generic [ref=e44]: ICQ 605515558
+        - generic [ref=e45]: © 2026 MaxKonvert
+        - generic [ref=e46]:
+          - img [ref=e47]
+          - link "MaxKonvert" [ref=e48] [cursor=pointer]:
+            - /url: https://t.me/MaxKonvert
+      - navigation [ref=e49]:
+        - list [ref=e50]:
+          - listitem [ref=e51]:
+            - link "Главная" [ref=e52] [cursor=pointer]:
+              - /url: /
+          - listitem [ref=e53]:
+            - link "Регистрация" [ref=e54] [cursor=pointer]:
+              - /url: "#register"
+          - listitem [ref=e55]:
+            - link "Новости" [ref=e56] [cursor=pointer]:
+              - /url: /news/
+          - listitem [ref=e57]:
+            - link "FAQ" [ref=e58] [cursor=pointer]:
+              - /url: /question/
+          - listitem [ref=e59]:
+            - link "Правила" [ref=e60] [cursor=pointer]:
+              - /url: /rules/
+          - listitem [ref=e61]:
+            - link "Контакты" [ref=e62] [cursor=pointer]:
+              - /url: /contacts/
+  - iframe [ref=e65]:
+    - generic [ref=f13e6]:
+      - text: protected by
+      - strong [ref=f13e7]: reCAPTCHA

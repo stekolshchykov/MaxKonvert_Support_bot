@@ -1,0 +1,92 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - link "Удобная система конвертации траффика" [ref=e5] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e7]: Удобная система конвертации траффика
+      - navigation [ref=e8]:
+        - list [ref=e9]:
+          - listitem [ref=e10]:
+            - link "Главная" [ref=e11] [cursor=pointer]:
+              - /url: /
+          - listitem [ref=e12]:
+            - link "Регистрация" [ref=e13] [cursor=pointer]:
+              - /url: "#register"
+          - listitem [ref=e14]:
+            - link "Новости" [ref=e15] [cursor=pointer]:
+              - /url: /news/
+          - listitem [ref=e16]:
+            - link "FAQ" [ref=e17] [cursor=pointer]:
+              - /url: /question/
+          - listitem [ref=e18]:
+            - link "Правила" [ref=e19] [cursor=pointer]:
+              - /url: /rules/
+          - listitem [ref=e20]:
+            - link "Контакты" [ref=e21] [cursor=pointer]:
+              - /url: /contacts/
+          - listitem [ref=e22]:
+            - link "Логин" [ref=e23] [cursor=pointer]:
+              - /url: "#login_block"
+  - generic [ref=e46]:
+    - generic [ref=e47]:
+      - heading "MaxKonvert - это смс партнерка с максимальным конвертом" [level=1] [ref=e48]:
+        - text: MaxKonvert - это смс партнерка
+        - text: с максимальным конвертом
+      - paragraph [ref=e49]:
+        - text: Не теряй время!
+        - text: Начни зарабатывать уже сегодня!
+    - link "Зарегистрироваться" [ref=e50] [cursor=pointer]:
+      - /url: "#register"
+  - generic [ref=e54]:
+    - heading "Не знаете где получить максимум прибыли при минимум трафике ?" [level=1] [ref=e55]:
+      - text: Не знаете где получить максимум
+      - text: прибыли при минимум трафике ?
+    - paragraph [ref=e57]: Тогда попробуйте наши платники с голосовым сопровождением регистрации
+    - paragraph [ref=e59]: А МТ подписки, WAP клик, псевдо-подписки, премиум смс помогут выжать максимум прибыли
+  - generic [ref=e61]:
+    - heading "Возникли вопросы ?" [level=1] [ref=e62]
+    - list [ref=e63]:
+      - listitem [ref=e64]: Тогда напишите нам и мы ответим в кратчайшие сроки
+      - listitem [ref=e65]: Свяжитесь с нами по электронной почте, тикету или через ICQ, Skype
+      - listitem [ref=e66]: Мы Вам поможем, подскажем и объясним все, что вам не понятно
+  - generic [ref=e68]:
+    - heading "MAXKONVERT - смс партнерка с максимальным конвертом" [level=1] [ref=e69]
+    - generic [ref=e70]:
+      - paragraph [ref=e73]: Наша цель - сделать так, чтобы MaxKonvert принес Вам как можно больше прибыли
+      - paragraph [ref=e76]: Ведь нет лучше мотивации к работе с системой чем высокий и стабильный доход
+      - paragraph [ref=e79]: Регистрируйтесь в качестве нашего партнёра уже сегодня и максимальная прибыль Вам обеспечена!
+    - link "Стать партнёром" [ref=e80] [cursor=pointer]:
+      - /url: "#register"
+  - contentinfo [ref=e81]:
+    - generic [ref=e83]:
+      - generic [ref=e84]:
+        - generic [ref=e85]: ICQ 605515558
+        - generic [ref=e86]: © 2026 MaxKonvert
+        - generic [ref=e87]:
+          - img [ref=e88]
+          - link "MaxKonvert" [ref=e89] [cursor=pointer]:
+            - /url: https://t.me/MaxKonvert
+      - navigation [ref=e90]:
+        - list [ref=e91]:
+          - listitem [ref=e92]:
+            - link "Главная" [ref=e93] [cursor=pointer]:
+              - /url: /
+          - listitem [ref=e94]:
+            - link "Регистрация" [ref=e95] [cursor=pointer]:
+              - /url: "#register"
+          - listitem [ref=e96]:
+            - link "Новости" [ref=e97] [cursor=pointer]:
+              - /url: /news/
+          - listitem [ref=e98]:
+            - link "FAQ" [ref=e99] [cursor=pointer]:
+              - /url: /question/
+          - listitem [ref=e100]:
+            - link "Правила" [ref=e101] [cursor=pointer]:
+              - /url: /rules/
+          - listitem [ref=e102]:
+            - link "Контакты" [ref=e103] [cursor=pointer]:
+              - /url: /contacts/
+  - iframe [ref=e106]:
+    - generic [ref=f1e6]:
+      - text: protected by
+      - strong [ref=f1e7]: reCAPTCHA

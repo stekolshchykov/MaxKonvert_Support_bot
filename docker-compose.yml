@@ -1,0 +1,66 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maxkonvert-bot
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./kb/docs:/app/kb/docs
+      - ./kb/questions:/app/kb/questions
+      - ./kb/index:/app/kb/index
+    command: ["python3", "/app/src/bot.py"]
+
+  watcher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maxkonvert-watcher
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./kb/docs:/app/kb/docs
+      - ./kb/questions:/app/kb/questions
+      - ./kb/index:/app/kb/index
+    command: ["/bin/bash", "/app/scripts/watcher.sh"]
+
+  reindex-periodic:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maxkonvert-reindex-periodic
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./kb/docs:/app/kb/docs
+      - ./kb/questions:/app/kb/questions
+      - ./kb/index:/app/kb/index
+    command: ["/bin/bash", "/app/scripts/reindex_loop.sh"]
+
+  editor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maxkonvert-editor
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./kb/docs:/app/kb/docs
+      - ./kb/questions:/app/kb/questions
+      - ./kb/index:/app/kb/index
+    ports:
+      - "${DOCS_EDITOR_PORT:-8090}:8090"
+    command: ["python3", "/app/src/docs_editor.py"]

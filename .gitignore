@@ -1,0 +1,7 @@
+.env
+kb/index/
+kb/questions/*.ndjson
+kb/questions/*.json
+kb/questions/logs/
+__pycache__/
+*.pyc

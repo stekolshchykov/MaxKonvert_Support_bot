@@ -1,0 +1,96 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - link "Удобная система конвертации траффика" [ref=e5] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e7]: Удобная система конвертации траффика
+      - navigation [ref=e8]:
+        - list [ref=e9]:
+          - listitem [ref=e10]:
+            - link "Главная" [ref=e11] [cursor=pointer]:
+              - /url: /
+          - listitem [ref=e12]:
+            - link "Регистрация" [ref=e13] [cursor=pointer]:
+              - /url: "#register"
+          - listitem [ref=e14]:
+            - link "Новости" [ref=e15] [cursor=pointer]:
+              - /url: /news/
+          - listitem [ref=e16]:
+            - link "FAQ" [ref=e17] [cursor=pointer]:
+              - /url: /question/
+          - listitem [ref=e18]:
+            - link "Правила" [ref=e19] [cursor=pointer]:
+              - /url: /rules/
+          - listitem [ref=e20]:
+            - link "Контакты" [ref=e21] [cursor=pointer]:
+              - /url: /contacts/
+          - listitem [ref=e22]:
+            - link "Логин" [ref=e23] [cursor=pointer]:
+              - /url: "#login_block"
+  - generic [ref=e25]:
+    - heading "Новости Системы" [level=1] [ref=e26]
+    - generic [ref=e27]:
+      - heading "Выплаты произведены всем партнерам!" [level=1] [ref=e28]
+      - paragraph [ref=e29]: Выплаты произведены всем партнерам!
+      - paragraph [ref=e30]: "Опубликовано: 30.03.2026 в 07:07"
+    - generic [ref=e31]:
+      - heading "Повысили цену выкупа Пуш подписок" [level=1] [ref=e32]
+      - paragraph [ref=e33]: Повысили цену выкупа Пуш подписок
+      - paragraph [ref=e34]: "Опубликовано: 20.03.2026 в 14:20"
+    - generic [ref=e35]:
+      - heading "Выплаты и премии произведены всем партнерам!" [level=1] [ref=e36]
+      - paragraph [ref=e37]: Выплаты и премии произведены всем партнерам!
+      - paragraph [ref=e38]: "Опубликовано: 16.03.2026 в 11:25"
+    - generic [ref=e39]:
+      - heading "Выплаты произведены всем партнерам!" [level=1] [ref=e40]
+      - paragraph [ref=e41]: Выплаты произведены всем партнерам!
+      - paragraph [ref=e42]: "Опубликовано: 09.03.2026 в 22:04"
+    - generic [ref=e43]:
+      - heading "Временное снижение цены выкупа push-подписок" [level=1] [ref=e44]
+      - paragraph [ref=e45]: Уважаемые партнёры!В последнее время мы фиксируем существенное снижение дохода от push-подписок. Данная ситуация наблюдается по всем сеткам, с которыми мы сотрудничаем. В настоящий момент мы активно анализируем причины просадки и ведём диалог с партнёрскими сетями для поиска оптимального решения и стабилизации показателей.В связи с текущей ситуацией мы вынуждены временно снизить цену выкупа push-подписок. Это вынужденная мера, направленная на сохранение стабильности работы и баланса экономики.Как только показатели начнут восстанавливаться и будут найдены эффективные решения, мы оперативно пересмотрим условия. Благодарим за понимание и продолжаем работать над улучшением результатов.
+      - paragraph [ref=e46]: "Опубликовано: 02.03.2026 в 09:27"
+    - generic [ref=e47]:
+      - heading "Выплаты произведены всем партнерам!" [level=1] [ref=e48]
+      - paragraph [ref=e49]: Выплаты произведены всем партнерам!
+      - paragraph [ref=e50]: "Опубликовано: 09.02.2026 в 13:21"
+    - generic [ref=e51]:
+      - heading "Выплаты и премии произведены всем партнерам!" [level=1] [ref=e52]
+      - paragraph [ref=e53]: Выплаты и премии произведены всем партнерам!
+      - paragraph [ref=e54]: "Опубликовано: 02.02.2026 в 16:38"
+    - generic [ref=e55]:
+      - heading "Выплаты произведены всем партнерам!" [level=1] [ref=e56]
+      - paragraph [ref=e57]: Выплаты произведены всем партнерам!
+      - paragraph [ref=e58]: "Опубликовано: 12.01.2026 в 09:09"
+  - contentinfo [ref=e59]:
+    - generic [ref=e61]:
+      - generic [ref=e62]:
+        - generic [ref=e63]: ICQ 605515558
+        - generic [ref=e64]: © 2026 MaxKonvert
+        - generic [ref=e65]:
+          - img [ref=e66]
+          - link "MaxKonvert" [ref=e67] [cursor=pointer]:
+            - /url: https://t.me/MaxKonvert
+      - navigation [ref=e68]:
+        - list [ref=e69]:
+          - listitem [ref=e70]:
+            - link "Главная" [ref=e71] [cursor=pointer]:
+              - /url: /
+          - listitem [ref=e72]:
+            - link "Регистрация" [ref=e73] [cursor=pointer]:
+              - /url: "#register"
+          - listitem [ref=e74]:
+            - link "Новости" [ref=e75] [cursor=pointer]:
+              - /url: /news/
+          - listitem [ref=e76]:
+            - link "FAQ" [ref=e77] [cursor=pointer]:
+              - /url: /question/
+          - listitem [ref=e78]:
+            - link "Правила" [ref=e79] [cursor=pointer]:
+              - /url: /rules/
+          - listitem [ref=e80]:
+            - link "Контакты" [ref=e81] [cursor=pointer]:
+              - /url: /contacts/
+  - iframe [ref=e84]:
+    - generic [ref=f17e6]:
+      - text: protected by
+      - strong [ref=f17e7]: reCAPTCHA

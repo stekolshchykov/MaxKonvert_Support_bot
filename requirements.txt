@@ -1,0 +1,8 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+python-telegram-bot==21.10
+torch==2.6.0+cpu
+sentence-transformers==3.4.1
+faiss-cpu==1.10.0
+numpy==2.2.4
+Flask==3.0.3
+python-dotenv==1.0.1
