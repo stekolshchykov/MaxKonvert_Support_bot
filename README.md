@@ -47,6 +47,11 @@ curl http://127.0.0.1:${BOT_HEALTH_PORT:-8081}/health
 curl http://127.0.0.1:${DOCS_EDITOR_PORT:-8090}/health
 ```
 
+## Порт Базы Знаний
+- Внутри контейнера/стека: `DOCS_EDITOR_PORT` (по умолчанию `8090`).
+- На сервере `128` для доступа из сети: `http://<IP_128>:18090/`.
+  - На текущем прод-контуре это прокси `128:18090 -> CT205:8090`.
+
 ## Smoke-тест менеджерского стиля
 ```bash
 docker compose exec -T bot python3 /app/scripts/sales_smoke_test.py
