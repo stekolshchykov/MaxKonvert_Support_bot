@@ -3,6 +3,7 @@ import fcntl
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -24,6 +25,7 @@ LOG_PATH = os.getenv("LOG_PATH", str(Path(QUESTIONS_DIR) / "logs"))
 EMBEDDING_MODEL = os.getenv(
     "EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 )
+REINDEX_LOCK_WAIT_SECONDS = int(os.getenv("REINDEX_LOCK_WAIT_SECONDS", "180"))
 
 Path(LOG_PATH).mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
@@ -37,14 +39,25 @@ logging.basicConfig(
 logger = logging.getLogger("reindex")
 
 
-def main():
+def acquire_reindex_lock(wait_seconds: int):
     lock = open(LOCK_FILE, "w")
+    deadline = time.time() + max(1, wait_seconds)
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return lock
+        except BlockingIOError:
+            if time.time() >= deadline:
+                lock.close()
+                raise TimeoutError(f"Lock wait timeout after {wait_seconds}s")
+            time.sleep(0.5)
+
+
+def main():
+    lock = None
     try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        logger.info("Another reindex is already running, skipping")
-        return
-    try:
+        lock = acquire_reindex_lock(REINDEX_LOCK_WAIT_SECONDS)
+        logger.info("Acquired reindex lock (wait <= %ss)", REINDEX_LOCK_WAIT_SECONDS)
         logger.info("Starting reindex...")
         idx = DocIndex(INDEX_PATH, EMBEDDING_MODEL)
         idx.build(DOCS_PATH)
@@ -53,8 +66,9 @@ def main():
         logger.exception("Reindex failed")
         raise
     finally:
-        fcntl.flock(lock, fcntl.LOCK_UN)
-        lock.close()
+        if lock is not None:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            lock.close()
 
 
 if __name__ == "__main__":

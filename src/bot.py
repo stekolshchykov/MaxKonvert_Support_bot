@@ -101,8 +101,10 @@ logger = logging.getLogger(__name__)
 STARTED_AT_UTC = datetime.now(timezone.utc)
 
 index: DocIndex | None = None
+index_signature: tuple[int, int, int, int] | None = None
 conversation_memory = defaultdict(lambda: deque(maxlen=max(2, CONTEXT_TURNS * 2)))
 state_lock = threading.Lock()
+index_lock = threading.Lock()
 
 
 def start_health_server():
@@ -137,19 +139,60 @@ def start_health_server():
     logger.info("Health server started at %s:%s", BOT_HEALTH_HOST, BOT_HEALTH_PORT)
 
 
-def get_index() -> DocIndex:
-    global index
-    if index is None:
+def current_index_signature() -> tuple[int, int, int, int]:
+    index_dir = Path(INDEX_PATH)
+    files = [index_dir / "index.faiss", index_dir / "meta.pkl"]
+    values: list[int] = []
+    for f in files:
+        try:
+            st = f.stat()
+            values.extend([int(st.st_mtime_ns), int(st.st_size)])
+        except FileNotFoundError:
+            values.extend([0, 0])
+    return (values[0], values[1], values[2], values[3])
+
+
+def maybe_reload_index(force: bool = False) -> DocIndex:
+    global index, index_signature
+    sig = current_index_signature()
+    if force or index is None:
         logger.info("Initializing index...")
         index = DocIndex(INDEX_PATH, EMBEDDING_MODEL)
+        index_signature = current_index_signature()
+        return index
+
+    # Reload in-memory index when on-disk artifacts changed after reindex.
+    if index_signature is not None and sig != index_signature and any(sig):
+        logger.info("Detected index update on disk, reloading in-memory index")
+        previous_chunks = len(index.chunks)
+        candidate = DocIndex(INDEX_PATH, EMBEDDING_MODEL)
+        if candidate.chunks:
+            index = candidate
+            index_signature = current_index_signature()
+            logger.info(
+                "Index reloaded successfully (%s -> %s chunks)",
+                previous_chunks,
+                len(candidate.chunks),
+            )
+        else:
+            logger.warning("Index reload produced empty chunks; keeping current in-memory index")
     return index
 
 
-def ensure_index():
-    idx = get_index()
-    if not idx.chunks:
-        logger.info("Index empty, building...")
-        idx.build(DOCS_PATH)
+def get_index() -> DocIndex:
+    with index_lock:
+        return maybe_reload_index(force=False)
+
+
+def ensure_index() -> DocIndex:
+    with index_lock:
+        idx = maybe_reload_index(force=False)
+        if not idx.chunks:
+            logger.info("Index empty, building...")
+            idx.build(DOCS_PATH)
+            global index_signature
+            index_signature = current_index_signature()
+        return idx
 
 
 def read_json(path: str) -> dict[str, Any]:
@@ -320,6 +363,24 @@ def build_docs_text(results: list[tuple[float, dict[str, Any]]]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+def rerank_results_by_query_tokens(
+    user_text: str, results: list[tuple[float, dict[str, Any]]]
+) -> list[tuple[float, dict[str, Any]]]:
+    tokens = query_tokens(user_text)
+    if not tokens or not results:
+        return results
+    rescored: list[tuple[float, int, float, dict[str, Any]]] = []
+    for score, payload in results:
+        text = (payload.get("text", "") or "").lower().replace("ё", "е")
+        overlap = sum(1 for tok in tokens if tok in text)
+        adjusted = float(score) + (0.08 * overlap)
+        if overlap and len(tokens) == 1 and tokens[0] in text:
+            adjusted += 0.12
+        rescored.append((adjusted, overlap, float(score), payload))
+    rescored.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
+    return [(row[2], row[3]) for row in rescored]
+
+
 def is_unknown_answer(text: str) -> bool:
     lowered = (text or "").lower()
     markers = [
@@ -465,6 +526,44 @@ def build_sales_manager_fallback(
     )
 
 
+def build_direct_definition_answer(user_text: str, results: list[tuple[float, dict[str, Any]]]) -> str:
+    tokens = query_tokens(user_text)
+    if not results or not tokens:
+        return ""
+    candidates: list[str] = []
+    for _, payload in results:
+        text = payload.get("text", "") or ""
+        for raw in text.splitlines():
+            line = raw.strip(" \t-*")
+            if len(line) < 8:
+                continue
+            low = line.lower().replace("ё", "е")
+            if not any(tok in low for tok in tokens):
+                continue
+            if (" это " in low) or ("- это" in low) or ("— это" in low):
+                candidates.append(line)
+                break
+        if not candidates:
+            compact = re.sub(r"\s+", " ", text.replace("\n", " ")).strip()
+            if compact:
+                low = compact.lower().replace("ё", "е")
+                if any(tok in low for tok in tokens) and (
+                    (" это " in low) or ("- это" in low) or ("— это" in low)
+                ):
+                    candidates.append(compact)
+        if candidates:
+            break
+    if not candidates:
+        return ""
+    line = re.sub(r"^[#]+\s*", "", candidates[0]).strip()
+    line = re.sub(r"\s+", " ", line).strip()
+    line = line.rstrip(" .") + "."
+    return (
+        f"{line} "
+        "Если хотите, подскажу, как это применить в вашей связке и что запускать первым."
+    )
+
+
 async def ask_ollama(prompt: str) -> str:
     try:
         async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
@@ -509,10 +608,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if history_for_retrieval and is_followup_query(user_text):
         retrieval_query = f"{history_for_retrieval}\n{user_text}"
 
-    ensure_index()
-    idx = get_index()
-    results = idx.search(retrieval_query, top_k=TOP_K)
-    best_score = results[0][0] if results else 0.0
+    idx = ensure_index()
+    raw_results = idx.search(retrieval_query, top_k=max(TOP_K, 8))
+    best_score = raw_results[0][0] if raw_results else 0.0
+    results = rerank_results_by_query_tokens(user_text, raw_results)[:TOP_K]
 
     append_jsonl(
         QUESTIONS_LOG_FILE,
@@ -542,43 +641,54 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text(fallback)
         return
 
-    prompt = build_prompt(
-        user_text=user_text,
-        history_text=get_dialog_history_text(key),
-        docs_text=build_docs_text(results),
-    )
-    answer = await ask_ollama(prompt)
-    if not answer:
-        answer = build_sales_manager_fallback(user_text, results)
-        if answer:
+    answer = build_direct_definition_answer(user_text, results)
+    if answer:
+        append_jsonl(
+            QUESTIONS_LOG_FILE,
+            build_question_event(update, user_text, "direct_definition_from_docs", best_score, key),
+        )
+    else:
+        prompt = build_prompt(
+            user_text=user_text,
+            history_text=get_dialog_history_text(key),
+            docs_text=build_docs_text(results),
+        )
+        answer = await ask_ollama(prompt)
+        if not answer:
+            answer = build_sales_manager_fallback(user_text, results)
+            if answer:
+                append_jsonl(
+                    QUESTIONS_LOG_FILE,
+                    build_question_event(
+                        update, user_text, "sales_fallback_after_model_error", best_score, key
+                    ),
+                )
+            append_jsonl(
+                UNANSWERED_LOG_FILE,
+                build_question_event(update, user_text, "model_timeout_or_error", best_score, key),
+            )
+        elif is_unknown_answer(answer):
+            answer = build_sales_manager_fallback(user_text, results, low_match=best_score < 0.35)
             append_jsonl(
                 QUESTIONS_LOG_FILE,
                 build_question_event(
-                    update, user_text, "sales_fallback_after_model_error", best_score, key
+                    update, user_text, "sales_override_model_no_answer", best_score, key
                 ),
             )
-        append_jsonl(
-            UNANSWERED_LOG_FILE,
-            build_question_event(update, user_text, "model_timeout_or_error", best_score, key),
-        )
-    elif is_unknown_answer(answer):
-        answer = build_sales_manager_fallback(user_text, results, low_match=best_score < 0.35)
-        append_jsonl(
-            QUESTIONS_LOG_FILE,
-            build_question_event(update, user_text, "sales_override_model_no_answer", best_score, key),
-        )
-        append_jsonl(
-            UNANSWERED_LOG_FILE,
-            build_question_event(update, user_text, "needs_kb_update_model_no_answer", best_score, key),
-        )
-    elif contains_unbacked_claims(answer, build_docs_text(results)):
-        # Keep model answer (manager-style UX priority), but record a quality signal.
-        append_jsonl(
-            QUESTIONS_LOG_FILE,
-            build_question_event(
-                update, user_text, "model_answer_with_unbacked_tokens", best_score, key
-            ),
-        )
+            append_jsonl(
+                UNANSWERED_LOG_FILE,
+                build_question_event(
+                    update, user_text, "needs_kb_update_model_no_answer", best_score, key
+                ),
+            )
+        elif contains_unbacked_claims(answer, build_docs_text(results)):
+            # Keep model answer (manager-style UX priority), but record a quality signal.
+            append_jsonl(
+                QUESTIONS_LOG_FILE,
+                build_question_event(
+                    update, user_text, "model_answer_with_unbacked_tokens", best_score, key
+                ),
+            )
 
     add_dialog_turn(key, "user", user_text)
     add_dialog_turn(key, "assistant", answer)
