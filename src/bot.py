@@ -370,7 +370,8 @@ def contains_unbacked_claims(answer: str, docs_text: str) -> bool:
         return False
     unsupported = {t for t in core if t not in docs_tokens}
     ratio = len(unsupported) / max(1, len(core))
-    return len(unsupported) >= 3 and ratio >= 0.35
+    # Be conservative: only flag clearly unsupported answers, avoid false positives.
+    return len(unsupported) >= 6 and ratio >= 0.55
 
 
 def query_tokens(text: str) -> list[str]:
@@ -404,29 +405,36 @@ def build_extractive_fallback(user_text: str, results: list[tuple[float, dict[st
     if not results:
         return ""
     tokens = query_tokens(user_text)
-    lines: list[tuple[str, str]] = []
-    seen = set()
-    for _, payload in results[: max(1, MAX_DOC_FRAGMENTS)]:
-        file_name = payload.get("file", "unknown")
-        text = payload.get("text", "") or ""
-        for raw in re.split(r"[\n\r]+", text):
-            line = raw.strip(" -*\t")
-            if len(line) < 18:
-                continue
-            low = line.lower().replace("ё", "е")
-            if tokens and not any(tok in low for tok in tokens):
-                continue
-            key = normalize_question(line)
-            if key in seen:
-                continue
-            seen.add(key)
-            lines.append((line, file_name))
+
+    def collect_lines(require_tokens: bool) -> list[tuple[str, str]]:
+        lines: list[tuple[str, str]] = []
+        seen = set()
+        for _, payload in results[: max(1, MAX_DOC_FRAGMENTS)]:
+            file_name = payload.get("file", "unknown")
+            text = payload.get("text", "") or ""
+            for raw in re.split(r"[\n\r]+", text):
+                line = raw.strip(" -*\t")
+                if len(line) < 18:
+                    continue
+                low = line.lower().replace("ё", "е")
+                if require_tokens and tokens and not any(tok in low for tok in tokens):
+                    continue
+                key = normalize_question(line)
+                if key in seen:
+                    continue
+                seen.add(key)
+                lines.append((line, file_name))
+                if len(lines) >= 4:
+                    break
             if len(lines) >= 4:
                 break
-        if len(lines) >= 4:
-            break
+        return lines
 
-    # If token filtering is too strict, still return strongest snippets.
+    # Primary pass: token-aware lines.
+    lines = collect_lines(require_tokens=True)
+    # Secondary pass: tolerate typos/short greetings by taking strongest lines without token filter.
+    if not lines:
+        lines = collect_lines(require_tokens=False)
     if not lines:
         return ""
 
@@ -447,12 +455,12 @@ def build_sales_manager_fallback(
         return extractive
     if low_match:
         return (
-            "Отличный вопрос, тема рабочая для запуска. "
-            "Чтобы сразу предложить вам лучший сценарий с нормальной конверсией и выплатой, "
+            "Спасибо за вопрос. "
+            "Подберу для вас оптимальный сценарий запуска под ваш трафик и цели. "
             f"{SALES_DEFAULT_CTA}"
         )
     return (
-        "Давайте сделаем так, чтобы вы быстро получили понятный план запуска и монетизации. "
+        "Могу быстро собрать для вас понятный план запуска и монетизации. "
         f"{SALES_DEFAULT_CTA}"
     )
 
@@ -564,17 +572,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             build_question_event(update, user_text, "needs_kb_update_model_no_answer", best_score, key),
         )
     elif contains_unbacked_claims(answer, build_docs_text(results)):
-        answer = build_sales_manager_fallback(user_text, results, low_match=best_score < 0.45)
+        # Keep model answer (manager-style UX priority), but record a quality signal.
         append_jsonl(
             QUESTIONS_LOG_FILE,
             build_question_event(
-                update, user_text, "sales_override_unbacked_claims", best_score, key
-            ),
-        )
-        append_jsonl(
-            UNANSWERED_LOG_FILE,
-            build_question_event(
-                update, user_text, "needs_kb_update_unbacked_claims", best_score, key
+                update, user_text, "model_answer_with_unbacked_tokens", best_score, key
             ),
         )
 
