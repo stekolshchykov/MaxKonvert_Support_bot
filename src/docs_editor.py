@@ -36,6 +36,64 @@ UNANSWERED_LOG_FILE.touch(exist_ok=True)
 
 app = Flask(__name__)
 
+
+def normalize_question(text: str) -> str:
+    s = (text or "").lower().strip()
+    s = s.replace("ё", "е")
+    s = " ".join(s.split())
+    return "".join(ch for ch in s if ch.isalnum() or ch == " ").strip()
+
+
+def write_json(path: Path, payload: dict):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def write_ndjson(path: Path, rows: list[dict]):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def run_reindex_once(timeout_sec: int = 240) -> tuple[bool, str]:
+    try:
+        proc = subprocess.run(
+            [PYTHON_BIN, REINDEX_SCRIPT],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout_sec,
+            check=False,
+        )
+        if proc.returncode == 0:
+            return True, "reindex_ok"
+        return False, f"reindex_rc_{proc.returncode}"
+    except Exception as e:
+        return False, f"reindex_error_{e}"
+
+
+def delete_question_everywhere(question_text: str) -> int:
+    target = normalize_question(question_text)
+    if not target:
+        return 0
+    removed = 0
+    for log_path in [QUESTIONS_LOG_FILE, NEW_QUESTIONS_LOG_FILE, UNANSWERED_LOG_FILE]:
+        rows = read_ndjson(log_path, limit=200000)
+        keep = []
+        for row in rows:
+            q = row.get("normalized_question") or normalize_question(row.get("question", ""))
+            if q == target:
+                removed += 1
+            else:
+                keep.append(row)
+        write_ndjson(log_path, list(reversed(keep)))
+    state = read_json(QUESTIONS_STATE_FILE)
+    if target in state:
+        del state[target]
+        write_json(QUESTIONS_STATE_FILE, state)
+    return removed
+
 PAGE = """<!doctype html>
 <html lang="ru">
 <head>
@@ -49,6 +107,8 @@ PAGE = """<!doctype html>
     input, textarea, button { font: inherit; border-radius: 8px; border: 1px solid #2e3f66; background: #141d36; color: #eaf0ff; }
     input { padding: 10px 12px; min-width: 280px; }
     button { padding: 10px 14px; cursor: pointer; background: #1b66ff; border: none; }
+    button.danger { background: #bf2e47; }
+    button.small { padding: 6px 10px; font-size: 12px; }
     button:hover { opacity: .92; }
     .nav a { padding: 8px 12px; border: 1px solid #2e3f66; border-radius: 8px; background:#121a30; color:#9bc3ff; text-decoration:none; }
     .nav a.active { background: #1b66ff; color: white; border-color: transparent; }
@@ -96,7 +156,13 @@ PAGE = """<!doctype html>
           <b>Files</b>
           <ul>
             {% for p in files %}
-              <li><a href="{{ url_for('home', path=p) }}">{{ p }}</a></li>
+              <li style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                <a href="{{ url_for('home', path=p) }}">{{ p }}</a>
+                <form method="post" action="{{ url_for('delete_doc') }}" style="margin:0;">
+                  <input type="hidden" name="path" value="{{ p }}" />
+                  <button class="small danger" type="submit">Delete</button>
+                </form>
+              </li>
             {% endfor %}
           </ul>
         </div>
@@ -106,7 +172,13 @@ PAGE = """<!doctype html>
               <input type="hidden" name="path" value="{{ current_path }}" />
               <p><b>Editing:</b> {{ current_path }}</p>
               <textarea name="content">{{ content }}</textarea>
-              <div style="margin-top:10px;"><button type="submit">Save</button></div>
+              <div style="margin-top:10px; display:flex; gap:8px;">
+                <button type="submit">Save</button>
+              </div>
+            </form>
+            <form method="post" action="{{ url_for('delete_doc') }}" style="margin-top:10px;">
+              <input type="hidden" name="path" value="{{ current_path }}" />
+              <button class="danger" type="submit">Delete This Document</button>
             </form>
           {% else %}
             <p>Select a file on the left to edit.</p>
@@ -124,13 +196,19 @@ PAGE = """<!doctype html>
       <div class="panel" style="margin-bottom:14px;">
         <h3 style="margin-top:0;">New Questions</h3>
         <table>
-          <tr><th>ts</th><th>question</th><th>user</th><th>status</th></tr>
+          <tr><th>ts</th><th>question</th><th>user</th><th>status</th><th>action</th></tr>
           {% for row in new_questions %}
             <tr>
               <td>{{ row.get('ts','') }}</td>
               <td><code>{{ row.get('question','') }}</code></td>
               <td>{{ row.get('user',{}).get('id','') }}</td>
               <td>{{ row.get('status','') }}</td>
+              <td>
+                <form method="post" action="{{ url_for('delete_question') }}">
+                  <input type="hidden" name="question" value="{{ row.get('question','') }}" />
+                  <button class="small danger" type="submit">Delete</button>
+                </form>
+              </td>
             </tr>
           {% endfor %}
         </table>
@@ -139,13 +217,19 @@ PAGE = """<!doctype html>
       <div class="panel" style="margin-bottom:14px;">
         <h3 style="margin-top:0;">Unanswered</h3>
         <table>
-          <tr><th>ts</th><th>question</th><th>user</th><th>status</th></tr>
+          <tr><th>ts</th><th>question</th><th>user</th><th>status</th><th>action</th></tr>
           {% for row in unanswered %}
             <tr>
               <td>{{ row.get('ts','') }}</td>
               <td><code>{{ row.get('question','') }}</code></td>
               <td>{{ row.get('user',{}).get('id','') }}</td>
               <td>{{ row.get('status','') }}</td>
+              <td>
+                <form method="post" action="{{ url_for('delete_question') }}">
+                  <input type="hidden" name="question" value="{{ row.get('question','') }}" />
+                  <button class="small danger" type="submit">Delete</button>
+                </form>
+              </td>
             </tr>
           {% endfor %}
         </table>
@@ -154,7 +238,7 @@ PAGE = """<!doctype html>
       <div class="panel">
         <h3 style="margin-top:0;">All Recent Questions</h3>
         <table>
-          <tr><th>ts</th><th>question</th><th>user</th><th>best_score</th><th>status</th></tr>
+          <tr><th>ts</th><th>question</th><th>user</th><th>best_score</th><th>status</th><th>action</th></tr>
           {% for row in all_questions %}
             <tr>
               <td>{{ row.get('ts','') }}</td>
@@ -162,6 +246,12 @@ PAGE = """<!doctype html>
               <td>{{ row.get('user',{}).get('id','') }}</td>
               <td>{{ row.get('best_score','') }}</td>
               <td>{{ row.get('status','') }}</td>
+              <td>
+                <form method="post" action="{{ url_for('delete_question') }}">
+                  <input type="hidden" name="question" value="{{ row.get('question','') }}" />
+                  <button class="small danger" type="submit">Delete</button>
+                </form>
+              </td>
             </tr>
           {% endfor %}
         </table>
@@ -286,7 +376,9 @@ def create():
         full.parent.mkdir(parents=True, exist_ok=True)
         if not full.exists():
             full.write_text("# New Document\n", encoding="utf-8")
-        return redirect(url_for("home", path=rel, msg=f"Created: {rel}"), code=303)
+        ok, _ = run_reindex_once()
+        msg = f"Created: {rel}" if ok else f"Created: {rel} (reindex pending)"
+        return redirect(url_for("home", path=rel, msg=msg), code=303)
     except Exception as e:
         return redirect(url_for("home", err=str(e)), code=303)
 
@@ -299,27 +391,53 @@ def save():
         full = safe_rel(rel)
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text(content, encoding="utf-8")
-        return redirect(url_for("home", path=rel, msg=f"Saved: {rel}"), code=303)
+        ok, _ = run_reindex_once()
+        msg = f"Saved: {rel}" if ok else f"Saved: {rel} (reindex pending)"
+        return redirect(url_for("home", path=rel, msg=msg), code=303)
     except Exception as e:
         return redirect(url_for("home", err=str(e), path=rel), code=303)
 
 
+@app.post("/delete-doc")
+def delete_doc():
+    rel = request.form.get("path", "").strip()
+    try:
+        full = safe_rel(rel)
+        if full.exists():
+            full.unlink()
+        # best-effort empty dir cleanup up to docs root
+        parent = full.parent
+        while parent != DOCS_PATH and parent.exists():
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+            parent = parent.parent
+        ok, _ = run_reindex_once()
+        msg = f"Deleted: {rel}" if ok else f"Deleted: {rel} (reindex pending)"
+        return redirect(url_for("home", msg=msg), code=303)
+    except Exception as e:
+        return redirect(url_for("home", err=str(e), path=rel), code=303)
+
+
+@app.post("/questions/delete")
+def delete_question():
+    question = request.form.get("question", "").strip()
+    if not question:
+        return redirect(url_for("questions", err="Empty question"), code=303)
+    removed = delete_question_everywhere(question)
+    return redirect(
+        url_for("questions", msg=f"Deleted question entries: {removed}"),
+        code=303,
+    )
+
+
 @app.post("/reindex-now")
 def reindex_now():
-    try:
-        proc = subprocess.run(
-            [PYTHON_BIN, REINDEX_SCRIPT],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=240,
-            check=False,
-        )
-        if proc.returncode == 0:
-            return redirect(url_for("questions", msg="Reindex complete"), code=303)
-        return redirect(url_for("questions", err=f"Reindex failed: rc={proc.returncode}"), code=303)
-    except Exception as e:
-        return redirect(url_for("questions", err=f"Reindex error: {e}"), code=303)
+    ok, details = run_reindex_once(timeout_sec=240)
+    if ok:
+        return redirect(url_for("questions", msg="Reindex complete"), code=303)
+    return redirect(url_for("questions", err=f"Reindex failed: {details}"), code=303)
 
 
 @app.get("/health")

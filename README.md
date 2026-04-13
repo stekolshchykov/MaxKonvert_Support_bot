@@ -1,52 +1,67 @@
-# MaxKonvert Support Bot (Docker Local)
+# MaxKonvert Support Bot (All-in-Docker)
 
 ## Что внутри
-- Telegram-бот (`src/bot.py`) с логикой:
-  - роль + история конкретного пользователя + фрагменты из базы знаний;
-  - без ручных `if вопрос про X`;
-  - запись всех вопросов;
-  - отдельная фиксация новых и неотвеченных вопросов.
-- Веб-консоль (`src/docs_editor.py`):
-  - редактирование `docs` в браузере;
-  - вкладка `Questions` (все/новые/неотвеченные вопросы);
-  - кнопка `Reindex Now`.
-- Автообновление индекса:
-  - `watcher` по событиям файлов;
-  - `reindex-periodic` по таймеру.
+- `bot` (`src/bot.py`): Telegram-бот в роли sales-менеджера, с памятью диалога по пользователю и логированием вопросов.
+- `editor` (`src/docs_editor.py`): web-редактор документации + вкладка `Questions`.
+- `watcher` + `reindex-periodic`: автопереиндексация базы знаний.
+- `ollama` + `ollama-init`: локальная LLM полностью в Docker, модель подтягивается автоматически.
 
-## Docker запуск
-1. Подготовь папки:
-```bash
-mkdir -p kb/docs kb/questions kb/index
-```
-2. Положи документацию в `kb/docs`.
-3. Скопируй шаблон и заполни `TELEGRAM_TOKEN`:
+## Web UI возможности
+- `Docs`:
+  - create/save документов;
+  - delete документа (раздела);
+  - `Reindex Now`.
+- `Questions`:
+  - список `new/unanswered/all`;
+  - удаление вопроса из логов (если уже обработан, чтобы не засорять список).
+
+## Быстрый запуск
+1. Скопировать шаблон:
 ```bash
 cp .env.example .env.docker
 ```
-4. Запусти:
+2. В `.env.docker` заполнить минимум:
+- `TELEGRAM_TOKEN`
+- при необходимости порты: `BOT_HEALTH_PORT`, `DOCS_EDITOR_PORT`
+- при необходимости host paths для volumes: `HOST_KB_DOCS_PATH`, `HOST_KB_QUESTIONS_PATH`, `HOST_KB_INDEX_PATH`, `HOST_OLLAMA_DATA_PATH`
+3. Запустить:
 ```bash
-docker compose up -d --build
+docker compose --env-file .env.docker up -d --build
 ```
 
-Примечание: сервис `bot` работает в `network_mode: host`, чтобы ходить в локальный Ollama на `127.0.0.1:11434` без публикации порта Ollama наружу.
-
-## Порт и папка знаний
-- Веб-консоль по умолчанию: `http://<host>:8090/`
-- Папка знаний/вопросов (на хосте):
-  - `./kb/docs` — документация
-  - `./kb/questions` — вопросы (questions/new/unanswered + state)
-  - `./kb/index` — индекс
+## Конфигурация (основное)
+- `TELEGRAM_TOKEN` — токен Telegram-бота.
+- `OLLAMA_MODEL` — модель Ollama (`qwen2.5:3b` по умолчанию).
+- `BOT_ROLE`, `BOT_EXTRA_RULES`, `SALES_DEFAULT_CTA` — постоянный промпт роли менеджера.
+- `BOT_HEALTH_PORT` — порт health endpoint бота (`/health`).
+- `DOCS_EDITOR_PORT` — порт web-редактора базы знаний.
+- `HOST_KB_DOCS_PATH` — папка документации на хосте.
+- `HOST_KB_QUESTIONS_PATH` — папка логов вопросов на хосте.
+- `HOST_KB_INDEX_PATH` — папка индекса на хосте.
+- `HOST_OLLAMA_DATA_PATH` — папка моделей Ollama на хосте.
 
 ## Проверка
 ```bash
 docker compose ps
-curl http://127.0.0.1:8090/health
+curl http://127.0.0.1:${BOT_HEALTH_PORT:-8081}/health
+curl http://127.0.0.1:${DOCS_EDITOR_PORT:-8090}/health
+```
+
+## Smoke-тест менеджерского стиля
+```bash
+docker compose exec -T bot python3 /app/scripts/sales_smoke_test.py
 ```
 
 ## Логи
 ```bash
+docker compose logs -f ollama
 docker compose logs -f bot
 docker compose logs -f editor
 docker compose logs -f watcher
+```
+
+## Docker Hub
+Если нужно публиковать образ в Docker Hub:
+```bash
+docker login -u <your_username>
 ```

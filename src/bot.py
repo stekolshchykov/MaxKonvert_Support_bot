@@ -6,6 +6,7 @@ import sys
 import threading
 from collections import defaultdict, deque
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,7 @@ EMBEDDING_MODEL = os.getenv(
 ).strip()
 TOP_K = int(os.getenv("TOP_K", "5").strip())
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.30").strip())
+LOW_CONFIDENCE_MODEL_SCORE = float(os.getenv("LOW_CONFIDENCE_MODEL_SCORE", "0.40").strip())
 OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "5.0").strip())
 CONTEXT_TURNS = int(os.getenv("CONTEXT_TURNS", "6").strip())
 RETRIEVAL_HISTORY_TURNS = int(os.getenv("RETRIEVAL_HISTORY_TURNS", "2").strip())
@@ -41,19 +43,30 @@ MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "1800").strip())
 MAX_DOC_SNIPPET_CHARS = int(os.getenv("MAX_DOC_SNIPPET_CHARS", "450").strip())
 MAX_DOC_FRAGMENTS = int(os.getenv("MAX_DOC_FRAGMENTS", "3").strip())
 MAX_ANSWER_CHARS = int(os.getenv("MAX_ANSWER_CHARS", "1600").strip())
+BOT_HEALTH_HOST = os.getenv("BOT_HEALTH_HOST", "0.0.0.0").strip()
+BOT_HEALTH_PORT = int(os.getenv("BOT_HEALTH_PORT", "8081").strip())
 BOT_ROLE = os.getenv(
     "BOT_ROLE",
     (
-        "Ты — консультант MaxKonvert. "
-        "Роль и факты берёшь только из локальной базы знаний."
+        "Ты — опытный sales-менеджер MaxKonvert в Telegram. "
+        "Ты ведёшь диалог как живой человек и мягко доводишь пользователя до следующего шага."
     ),
 ).strip()
 BOT_EXTRA_RULES = os.getenv(
     "BOT_EXTRA_RULES",
     (
         "Отвечай на языке пользователя. "
-        "Если подтверждения в документации нет — скажи об этом прямо. "
-        "Не выдумывай факты."
+        "Пиши естественно, без канцелярита. "
+        "Не используй формулировки вида «нет в документации», «я не знаю». "
+        "Если данных мало, дай полезный ориентир и задай один уточняющий вопрос. "
+        "Не выдумывай конкретные цифры и факты."
+    ),
+).strip()
+SALES_DEFAULT_CTA = os.getenv(
+    "SALES_DEFAULT_CTA",
+    (
+        "Чтобы дать максимально точный и выгодный вариант, уточните, пожалуйста: GEO, "
+        "примерный объём трафика в сутки и какой формат вам ближе (MT, WAP, pseudo, premium SMS)."
     ),
 ).strip()
 
@@ -85,16 +98,58 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+STARTED_AT_UTC = datetime.now(timezone.utc)
 
-index = DocIndex(INDEX_PATH, EMBEDDING_MODEL)
+index: DocIndex | None = None
 conversation_memory = defaultdict(lambda: deque(maxlen=max(2, CONTEXT_TURNS * 2)))
 state_lock = threading.Lock()
 
 
+def start_health_server():
+    if BOT_HEALTH_PORT <= 0:
+        return
+
+    class HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            if self.path != "/health":
+                self.send_response(404)
+                self.end_headers()
+                return
+            payload = {
+                "status": "ok",
+                "service": "maxkonvert-bot",
+                "model": OLLAMA_MODEL,
+                "started_at_utc": STARTED_AT_UTC.isoformat(),
+            }
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, fmt: str, *args):
+            logger.debug("health_http %s", fmt % args)
+
+    server = HTTPServer((BOT_HEALTH_HOST, BOT_HEALTH_PORT), HealthHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    logger.info("Health server started at %s:%s", BOT_HEALTH_HOST, BOT_HEALTH_PORT)
+
+
+def get_index() -> DocIndex:
+    global index
+    if index is None:
+        logger.info("Initializing index...")
+        index = DocIndex(INDEX_PATH, EMBEDDING_MODEL)
+    return index
+
+
 def ensure_index():
-    if not index.chunks:
+    idx = get_index()
+    if not idx.chunks:
         logger.info("Index empty, building...")
-        index.build(DOCS_PATH)
+        idx.build(DOCS_PATH)
 
 
 def read_json(path: str) -> dict[str, Any]:
@@ -242,9 +297,11 @@ def build_prompt(user_text: str, history_text: str, docs_text: str) -> str:
     return (
         f"{BOT_ROLE}\n"
         f"{BOT_EXTRA_RULES}\n\n"
-        "Правило ответа: если во фрагментах есть прямой факт по вопросу, обязательно дай этот факт.\n"
-        "Пиши кратко и структурно: 2-6 пунктов.\n"
-        "Добавь в конце строку вида: Источник: <имя файла>.\n\n"
+        "Стиль ответа: 3-6 коротких предложений, дружелюбно и по делу.\n"
+        "Если есть факты во фрагментах, вплетай их в текст естественно.\n"
+        "Не называй конкретные способы, цифры, проценты и API, если этого нет во фрагментах.\n"
+        "Если факт не подтвержден во фрагментах, не отрицай это напрямую, а переведи в менеджерский шаг: уточни вводные и предложи быстро подобрать вариант.\n"
+        "В конце добавляй один конкретный уточняющий вопрос, чтобы продвинуть диалог к запуску.\n\n"
         "[Chat history with this user]\n"
         f"{history_text}\n\n"
         "[Knowledge base fragments]\n"
@@ -274,6 +331,46 @@ def is_unknown_answer(text: str) -> bool:
         "no information in the documentation",
     ]
     return any(marker in lowered for marker in markers)
+
+
+def contains_unbacked_claims(answer: str, docs_text: str) -> bool:
+    answer_tokens = {
+        t
+        for t in re.findall(r"[a-zа-я0-9]+", (answer or "").lower().replace("ё", "е"))
+        if len(t) >= 4
+    }
+    docs_tokens = {
+        t
+        for t in re.findall(r"[a-zа-я0-9]+", (docs_text or "").lower().replace("ё", "е"))
+        if len(t) >= 4
+    }
+    if not answer_tokens or not docs_tokens:
+        return False
+
+    ignore = {
+        "maxkonvert",
+        "можно",
+        "нужно",
+        "лучше",
+        "вариант",
+        "уточните",
+        "подскажите",
+        "подобрать",
+        "запуск",
+        "запуска",
+        "трафик",
+        "трафика",
+        "условия",
+        "формат",
+        "форматы",
+        "geo",
+    }
+    core = {t for t in answer_tokens if t not in ignore}
+    if not core:
+        return False
+    unsupported = {t for t in core if t not in docs_tokens}
+    ratio = len(unsupported) / max(1, len(core))
+    return len(unsupported) >= 3 and ratio >= 0.35
 
 
 def query_tokens(text: str) -> list[str]:
@@ -331,18 +428,33 @@ def build_extractive_fallback(user_text: str, results: list[tuple[float, dict[st
 
     # If token filtering is too strict, still return strongest snippets.
     if not lines:
-        for _, payload in results[:2]:
-            file_name = payload.get("file", "unknown")
-            snippet = (payload.get("text", "") or "").strip().replace("\n", " ")
-            snippet = re.sub(r"\s+", " ", snippet)[:220]
-            if snippet:
-                lines.append((snippet, file_name))
-        if not lines:
-            return ""
+        return ""
 
-    source_files = sorted({f for _, f in lines})
-    bullets = "\n".join(f"- {line}" for line, _ in lines[:4])
-    return f"По документации:\n{bullets}\n\nИсточник: {', '.join(source_files)}"
+    snippets = [line for line, _ in lines[:3]]
+    if not snippets:
+        return ""
+    lead = "По вашему запросу вижу рабочие варианты:"
+    body = " ".join(snippets)
+    body = re.sub(r"\s+", " ", body).strip()
+    return f"{lead} {body} {SALES_DEFAULT_CTA}"
+
+
+def build_sales_manager_fallback(
+    user_text: str, results: list[tuple[float, dict[str, Any]]], *, low_match: bool = False
+) -> str:
+    extractive = build_extractive_fallback(user_text, results)
+    if extractive:
+        return extractive
+    if low_match:
+        return (
+            "Отличный вопрос, тема рабочая для запуска. "
+            "Чтобы сразу предложить вам лучший сценарий с нормальной конверсией и выплатой, "
+            f"{SALES_DEFAULT_CTA}"
+        )
+    return (
+        "Давайте сделаем так, чтобы вы быстро получили понятный план запуска и монетизации. "
+        f"{SALES_DEFAULT_CTA}"
+    )
 
 
 async def ask_ollama(prompt: str) -> str:
@@ -355,9 +467,9 @@ async def ask_ollama(prompt: str) -> str:
                     "prompt": prompt,
                     "stream": False,
                     "options": {
-                        "temperature": 0.2,
+                        "temperature": 0.1,
                         "num_ctx": 1536,
-                        "num_predict": 140,
+                        "num_predict": 180,
                     },
                 },
             )
@@ -372,8 +484,8 @@ async def ask_ollama(prompt: str) -> str:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(
-        "Привет! Я бот поддержки MaxKonvert.\n"
-        "Задайте вопрос, и я отвечу по документации."
+        "Привет! Я менеджер MaxKonvert и помогу подобрать оптимальный вариант монетизации.\n"
+        "Опишите ваш трафик или задайте вопрос по условиям — разберём по шагам."
     )
 
 
@@ -390,7 +502,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         retrieval_query = f"{history_for_retrieval}\n{user_text}"
 
     ensure_index()
-    results = index.search(retrieval_query, top_k=TOP_K)
+    idx = get_index()
+    results = idx.search(retrieval_query, top_k=TOP_K)
     best_score = results[0][0] if results else 0.0
 
     append_jsonl(
@@ -400,13 +513,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     record_question_if_new(update, user_text, key, best_score)
 
     if best_score < SIMILARITY_THRESHOLD:
-        fallback = (
-            "К сожалению, в документации нет подтверждённой информации по этому вопросу. "
-            "Обратитесь в официальную поддержку MaxKonvert: https://t.me/MaxKonvert"
-        )
+        fallback = build_sales_manager_fallback(user_text, results, low_match=True)
         append_jsonl(
             UNANSWERED_LOG_FILE,
-            build_question_event(update, user_text, "no_docs_match", best_score, key),
+            build_question_event(update, user_text, "needs_kb_update_low_match", best_score, key),
+        )
+        add_dialog_turn(key, "user", user_text)
+        add_dialog_turn(key, "assistant", fallback)
+        await update.effective_message.reply_text(fallback)
+        return
+
+    if best_score < LOW_CONFIDENCE_MODEL_SCORE:
+        fallback = build_sales_manager_fallback(user_text, results, low_match=True)
+        append_jsonl(
+            UNANSWERED_LOG_FILE,
+            build_question_event(update, user_text, "needs_kb_update_low_confidence", best_score, key),
         )
         add_dialog_turn(key, "user", user_text)
         add_dialog_turn(key, "assistant", fallback)
@@ -420,44 +541,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     answer = await ask_ollama(prompt)
     if not answer:
-        answer = build_extractive_fallback(user_text, results)
+        answer = build_sales_manager_fallback(user_text, results)
         if answer:
             append_jsonl(
                 QUESTIONS_LOG_FILE,
                 build_question_event(
-                    update, user_text, "extractive_fallback_after_model_error", best_score, key
+                    update, user_text, "sales_fallback_after_model_error", best_score, key
                 ),
             )
-        else:
-            answer = (
-                "Не удалось сформировать ответ в заданный лимит времени. "
-                "Повторите запрос или обратитесь в поддержку: https://t.me/MaxKonvert"
-            )
-            append_jsonl(
-                UNANSWERED_LOG_FILE,
-                build_question_event(update, user_text, "model_timeout_or_error", best_score, key),
-            )
+        append_jsonl(
+            UNANSWERED_LOG_FILE,
+            build_question_event(update, user_text, "model_timeout_or_error", best_score, key),
+        )
     elif is_unknown_answer(answer):
-        if best_score >= (SIMILARITY_THRESHOLD + 0.08):
-            extractive = build_extractive_fallback(user_text, results)
-            if extractive:
-                answer = extractive
-                append_jsonl(
-                    QUESTIONS_LOG_FILE,
-                    build_question_event(
-                        update, user_text, "extractive_override_model_no_answer", best_score, key
-                    ),
-                )
-            else:
-                append_jsonl(
-                    UNANSWERED_LOG_FILE,
-                    build_question_event(update, user_text, "model_no_answer", best_score, key),
-                )
-        else:
-            append_jsonl(
-                UNANSWERED_LOG_FILE,
-                build_question_event(update, user_text, "model_no_answer", best_score, key),
-            )
+        answer = build_sales_manager_fallback(user_text, results, low_match=best_score < 0.35)
+        append_jsonl(
+            QUESTIONS_LOG_FILE,
+            build_question_event(update, user_text, "sales_override_model_no_answer", best_score, key),
+        )
+        append_jsonl(
+            UNANSWERED_LOG_FILE,
+            build_question_event(update, user_text, "needs_kb_update_model_no_answer", best_score, key),
+        )
+    elif contains_unbacked_claims(answer, build_docs_text(results)):
+        answer = build_sales_manager_fallback(user_text, results, low_match=best_score < 0.45)
+        append_jsonl(
+            QUESTIONS_LOG_FILE,
+            build_question_event(
+                update, user_text, "sales_override_unbacked_claims", best_score, key
+            ),
+        )
+        append_jsonl(
+            UNANSWERED_LOG_FILE,
+            build_question_event(
+                update, user_text, "needs_kb_update_unbacked_claims", best_score, key
+            ),
+        )
 
     add_dialog_turn(key, "user", user_text)
     add_dialog_turn(key, "assistant", answer)
@@ -473,10 +592,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    ensure_index()
+    start_health_server()
     if not TOKEN:
         logger.error("TELEGRAM_TOKEN not set")
         sys.exit(1)
+    ensure_index()
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

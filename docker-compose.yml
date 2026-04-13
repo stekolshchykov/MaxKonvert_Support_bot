@@ -1,17 +1,50 @@
 services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: maxkonvert-ollama
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    volumes:
+      - ${HOST_OLLAMA_DATA_PATH:-./kb/ollama}:/root/.ollama
+    # Keep Ollama internal to compose network to avoid host port conflicts.
+
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: maxkonvert-ollama-init
+    restart: "no"
+    env_file:
+      - .env.docker
+    depends_on:
+      - ollama
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        set -e
+        until OLLAMA_HOST=http://ollama:11434 ollama list >/dev/null 2>&1; do
+          sleep 2
+        done
+        OLLAMA_HOST=http://ollama:11434 ollama pull ${OLLAMA_MODEL}
+
   bot:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: maxkonvert-bot
     restart: unless-stopped
-    network_mode: host
     env_file:
       - .env.docker
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully
     volumes:
-      - ./kb/docs:/app/kb/docs
-      - ./kb/questions:/app/kb/questions
-      - ./kb/index:/app/kb/index
+      - ${HOST_KB_DOCS_PATH:-./kb/docs}:/app/kb/docs
+      - ${HOST_KB_QUESTIONS_PATH:-./kb/questions}:/app/kb/questions
+      - ${HOST_KB_INDEX_PATH:-./kb/index}:/app/kb/index
+    ports:
+      - "${BOT_HEALTH_PORT:-8081}:8081"
     command: ["python3", "/app/src/bot.py"]
 
   watcher:
@@ -22,12 +55,13 @@ services:
     restart: unless-stopped
     env_file:
       - .env.docker
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully
     volumes:
-      - ./kb/docs:/app/kb/docs
-      - ./kb/questions:/app/kb/questions
-      - ./kb/index:/app/kb/index
+      - ${HOST_KB_DOCS_PATH:-./kb/docs}:/app/kb/docs
+      - ${HOST_KB_QUESTIONS_PATH:-./kb/questions}:/app/kb/questions
+      - ${HOST_KB_INDEX_PATH:-./kb/index}:/app/kb/index
     command: ["/bin/bash", "/app/scripts/watcher.sh"]
 
   reindex-periodic:
@@ -38,12 +72,13 @@ services:
     restart: unless-stopped
     env_file:
       - .env.docker
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully
     volumes:
-      - ./kb/docs:/app/kb/docs
-      - ./kb/questions:/app/kb/questions
-      - ./kb/index:/app/kb/index
+      - ${HOST_KB_DOCS_PATH:-./kb/docs}:/app/kb/docs
+      - ${HOST_KB_QUESTIONS_PATH:-./kb/questions}:/app/kb/questions
+      - ${HOST_KB_INDEX_PATH:-./kb/index}:/app/kb/index
     command: ["/bin/bash", "/app/scripts/reindex_loop.sh"]
 
   editor:
@@ -54,12 +89,13 @@ services:
     restart: unless-stopped
     env_file:
       - .env.docker
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully
     volumes:
-      - ./kb/docs:/app/kb/docs
-      - ./kb/questions:/app/kb/questions
-      - ./kb/index:/app/kb/index
+      - ${HOST_KB_DOCS_PATH:-./kb/docs}:/app/kb/docs
+      - ${HOST_KB_QUESTIONS_PATH:-./kb/questions}:/app/kb/questions
+      - ${HOST_KB_INDEX_PATH:-./kb/index}:/app/kb/index
     ports:
       - "${DOCS_EDITOR_PORT:-8090}:8090"
     command: ["python3", "/app/src/docs_editor.py"]

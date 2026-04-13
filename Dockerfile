@@ -18,7 +18,6 @@ RUN pip install --upgrade pip && pip install -r /app/requirements.txt
 
 COPY src /app/src
 COPY scripts /app/scripts
-COPY .env.docker /app/.env
 
 RUN chmod +x /app/scripts/watcher.sh /app/scripts/reindex_loop.sh
 
