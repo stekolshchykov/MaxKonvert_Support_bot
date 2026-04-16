@@ -54,6 +54,78 @@ def append_jsonl(path: str, payload: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# User profile extraction
+# ---------------------------------------------------------------------------
+
+
+class UserProfileExtractor:
+    """Extract small facts from user messages to personalize prompts."""
+
+    NAME_PATTERNS = [
+        re.compile(r"меня\s+зовут\s+([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+)?)", re.IGNORECASE),
+        re.compile(r"я\s+[-—]\s+([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+)?)", re.IGNORECASE),
+        re.compile(r"имя[:\s]+([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+)?)", re.IGNORECASE),
+    ]
+    GEO_KEYWORDS: set[str] = {
+        "россия", "украина", "казахстан", "беларусь", "узбекистан",
+        "азербайджан", "киргизия", "таджикистан", "молдова", "армения",
+        "грузия", "европа", "азия", "снг", "латам", "бразилия",
+        "индия", "индонезия", "турция", "мена", "казахстан",
+        "казахстана", "украины", "россии", "беларуси",
+    }
+    FORMAT_KEYWORDS: set[str] = {"mt", "wap", "pseudo", "premium sms"}
+    VOLUME_RE = re.compile(
+        r"(\d+(?:\s*\d{3})*(?:[.,]\d+)?)\s*(?:тыс\.?|млн|k|м)?\s*(?:траф|клик|установ|лид|пользоват|юзер|конверс|в\s+сутки|в\s+день)",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def extract(cls, text: str) -> dict[str, str]:
+        facts: dict[str, str] = {}
+        lowered = text.lower()
+        for pat in cls.NAME_PATTERNS:
+            m = pat.search(text)
+            if m:
+                facts["имя"] = m.group(1).strip()
+                break
+        for geo in cls.GEO_KEYWORDS:
+            if geo in lowered:
+                facts["geo"] = geo.capitalize()
+                break
+        for fmt in cls.FORMAT_KEYWORDS:
+            if fmt in lowered:
+                facts["формат"] = fmt.upper() if fmt != "premium sms" else "Premium SMS"
+                break
+        vm = cls.VOLUME_RE.search(text)
+        if vm:
+            facts["объём"] = vm.group(0).strip()
+        return facts
+
+
+def _profile_path(key: str) -> Path:
+    safe_key = re.sub(r"[^\w-]", "_", key)
+    return Path(Config.USER_PROFILES_DIR) / f"{safe_key}.json"
+
+
+def load_profile(key: str) -> dict[str, str]:
+    p = _profile_path(key)
+    if p.exists():
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return {k: str(v) for k, v in data.items() if v}
+        except Exception:
+            pass
+    return {}
+
+
+def save_profile(key: str, profile: dict[str, str]) -> None:
+    p = _profile_path(key)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(str(p), profile)
+
+
+# ---------------------------------------------------------------------------
 # Assistant core
 # ---------------------------------------------------------------------------
 
@@ -84,6 +156,9 @@ class Assistant:
         Path(Config.QUESTIONS_LOG_FILE).touch(exist_ok=True)
         Path(Config.NEW_QUESTIONS_LOG_FILE).touch(exist_ok=True)
         Path(Config.UNANSWERED_LOG_FILE).touch(exist_ok=True)
+        Path(Config.USER_PROFILES_DIR).mkdir(parents=True, exist_ok=True)
+        Path(Config.SESSIONS_DIR).mkdir(parents=True, exist_ok=True)
+        Path(Config.USER_PROFILES_DIR).mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
     # Index management (preserved from bot.py)
@@ -138,15 +213,56 @@ class Assistant:
             return idx
 
     # ------------------------------------------------------------------
+    # Session persistence
+    # ------------------------------------------------------------------
+
+    def _session_path(self, key: str) -> Path:
+        safe_key = re.sub(r"[^\w-]", "_", key)
+        return Path(Config.SESSIONS_DIR) / f"{safe_key}.json"
+
+    def _load_memory(self, key: str) -> None:
+        if key in self.conversation_memory:
+            return
+        p = self._session_path(key)
+        if p.exists():
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                turns = data.get("turns", []) if isinstance(data, dict) else []
+                self.conversation_memory[key] = deque(
+                    turns, maxlen=max(2, Config.CONTEXT_TURNS * 2)
+                )
+            except Exception:
+                logger.exception("Failed to load session %s", key)
+
+    def _save_memory(self, key: str) -> None:
+        p = self._session_path(key)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        turns = list(self.conversation_memory.get(key, []))
+        write_json_atomic(str(p), {"turns": turns})
+
+    def clear_memory(self, key: str) -> None:
+        if key in self.conversation_memory:
+            del self.conversation_memory[key]
+        p = self._session_path(key)
+        if p.exists():
+            try:
+                p.unlink()
+            except Exception:
+                logger.exception("Failed to clear session %s", key)
+
+    # ------------------------------------------------------------------
     # Conversation memory (preserved from bot.py)
     # ------------------------------------------------------------------
 
     def add_dialog_turn(self, key: str, role: str, text: str) -> None:
         text = (text or "").strip()
         if text:
+            self._load_memory(key)
             self.conversation_memory[key].append({"role": role, "text": text})
+            self._save_memory(key)
 
     def get_recent_user_context(self, key: str) -> str:
+        self._load_memory(key)
         history = self.conversation_memory.get(key)
         if not history:
             return ""
@@ -156,6 +272,7 @@ class Assistant:
         return "\n".join(user_turns[-max(1, Config.RETRIEVAL_HISTORY_TURNS):])
 
     def get_dialog_history_text(self, key: str) -> str:
+        self._load_memory(key)
         history = self.conversation_memory.get(key)
         if not history:
             return "(история пуста)"
@@ -238,6 +355,7 @@ class Assistant:
         history_text: str,
         docs_text: str,
         action_results_text: str = "",
+        profile_text: str = "",
     ) -> str:
         action_section = ""
         if self.executor.registry.actions:
@@ -252,20 +370,25 @@ class Assistant:
         if action_results_text:
             action_section += f"\n[Результаты вызванных действий]\n{action_results_text}\n"
 
+        profile_section = ""
+        if profile_text:
+            profile_section = f"\n[Что мы знаем о пользователе]\n{profile_text}\n"
+
         return (
             f"{Config.BOT_ROLE}\n"
             f"{Config.BOT_EXTRA_RULES}\n\n"
-            "Отвечай только по фрагментам базы знаний ниже.\n"
+            "Если вопрос про условия MaxKonvert — опирайся на фрагменты базы знаний ниже.\n"
+            "Если вопрос социальный или про предыдущие сообщения — отвечай естественно по истории диалога.\n"
             "Не добавляй маркетинговые CTA и не придумывай факты.\n"
-            "Если во фрагментах есть прямое определение, используй его почти дословно.\n"
-            "Стиль ответа: кратко, по делу, 1-4 предложения.\n"
-            f"{action_section}\n"
-            "[Chat history with this user]\n"
+            "Стиль ответа: кратко, по делу, 1-4 предложения, разговорный.\n"
+            f"{action_section}"
+            f"{profile_section}\n"
+            "[История диалога]\n"
             f"{history_text}\n\n"
-            "[Knowledge base fragments]\n"
+            "[Фрагменты базы знаний]\n"
             f"{docs_text}\n\n"
-            f"[Current question]\n{user_text}\n\n"
-            "[Answer]"
+            f"[Текущий вопрос]\n{user_text}\n\n"
+            "[Ответ]"
         )
 
     def build_docs_text(self, results: list[tuple[float, dict[str, Any]]]) -> str:
@@ -361,6 +484,45 @@ class Assistant:
         )
         return lowered.startswith(patterns)
 
+    def is_social_or_memory_query(self, text: str) -> bool:
+        lowered = (text or "").strip().lower()
+        social_patterns = (
+            r"^привет",
+            r"^здравствуй",
+            r"^добрый",
+            r"^пока",
+            r"^до\s+свидан",
+            r"спасибо",
+            r"благодар",
+            r"как\s+(моё|мое|твоё|твое)\s+имя",
+            r"как\s+меня\s+зовут",
+            r"кто\s+я",
+            r"как\s+дела",
+            r"как\s+ты",
+            r"что\s+делаешь",
+            r"чем\s+занимаешься",
+        )
+        return any(re.search(p, lowered) for p in social_patterns)
+
+    def should_use_model(
+        self, user_text: str, conversation_key: str, best_score: float
+    ) -> bool:
+        history = self.conversation_memory.get(conversation_key)
+        has_history = bool(history) and len(history) >= 2
+        words = len(user_text.split())
+        if has_history and (
+            words <= 12
+            or self.is_social_or_memory_query(user_text)
+            or self.is_followup_query(user_text)
+        ):
+            return True
+        if self.is_social_or_memory_query(user_text):
+            return True
+        # Skip model only when score is very low and there is no history
+        if best_score < 0.12 and not has_history:
+            return False
+        return True
+
     # ------------------------------------------------------------------
     # Quality checks (preserved from bot.py)
     # ------------------------------------------------------------------
@@ -416,88 +578,28 @@ class Assistant:
         return len(unsupported) >= 6 and ratio >= 0.55
 
     # ------------------------------------------------------------------
-    # Fallback builders (preserved from bot.py)
+    # Fallback builders (rewritten for human tone)
     # ------------------------------------------------------------------
-
-    def build_extractive_fallback(
-        self,
-        user_text: str,
-        results: list[tuple[float, dict[str, Any]]],
-        *,
-        include_cta: bool = True,
-        lead: str = "По вашему запросу вижу рабочие варианты:",
-    ) -> str:
-        if not results:
-            return ""
-        tokens = self.query_tokens(user_text)
-
-        def collect_lines(require_tokens: bool) -> list[tuple[str, str]]:
-            lines: list[tuple[str, str]] = []
-            seen = set()
-            for _, payload in results[: max(1, Config.MAX_DOC_FRAGMENTS)]:
-                file_name = payload.get("file", "unknown")
-                text = payload.get("text", "") or ""
-                for raw in re.split(r"[\n\r]+", text):
-                    line = raw.strip(" -*\t")
-                    if len(line) < 18:
-                        continue
-                    low = line.lower().replace("ё", "е")
-                    if require_tokens and tokens and not any(tok in low for tok in tokens):
-                        continue
-                    key = self.normalize_question(line)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    lines.append((line, file_name))
-                    if len(lines) >= 4:
-                        break
-                if len(lines) >= 4:
-                    break
-            return lines
-
-        lines = collect_lines(require_tokens=True)
-        if not lines:
-            lines = collect_lines(require_tokens=False)
-        if not lines:
-            return ""
-        snippets = [line for line, _ in lines[:3]]
-        if not snippets:
-            return ""
-        body = " ".join(snippets)
-        body = re.sub(r"\s+", " ", body).strip()
-        if include_cta:
-            return f"{lead} {body} {Config.SALES_DEFAULT_CTA}"
-        return f"{lead} {body}"
 
     def build_sales_manager_fallback(
         self, user_text: str, results: list[tuple[float, dict[str, Any]]], *, low_match: bool = False
     ) -> str:
-        extractive = self.build_extractive_fallback(user_text, results)
-        if extractive:
-            return extractive
         if low_match:
             return (
-                "Спасибо за вопрос. "
-                "Подберу для вас оптимальный сценарий запуска под ваш трафик и цели. "
-                f"{Config.SALES_DEFAULT_CTA}"
+                "Спасибо за вопрос! Чтобы подобрать под тебя самый выгодный вариант, "
+                "расскажи, пожалуйста: из какого ты GEO, какой объём трафика в сутки "
+                "и какой формат интересует (MT, WAP, pseudo, premium SMS)."
             )
         return (
-            "Могу быстро собрать для вас понятный план запуска и монетизации. "
-            f"{Config.SALES_DEFAULT_CTA}"
+            "Могу быстро собрать персональный план запуска. "
+            "Для этого уточни: GEO, объём трафика в сутки и предпочтительный формат "
+            "(MT, WAP, pseudo, premium SMS)."
         )
 
     def build_docs_grounded_fallback(
         self, user_text: str, results: list[tuple[float, dict[str, Any]]]
     ) -> str:
-        extractive = self.build_extractive_fallback(
-            user_text,
-            results,
-            include_cta=False,
-            lead="По базе знаний:",
-        )
-        if extractive:
-            return extractive
-        return "В базе знаний пока нет точного ответа на этот вопрос."
+        return "По этому пункту у меня пока нет точной цифры в базе — уточню у команды и скину тебе ответ."
 
     def build_direct_definition_answer(
         self, user_text: str, results: list[tuple[float, dict[str, Any]]]
@@ -510,7 +612,10 @@ class Assistant:
             text = payload.get("text", "") or ""
             for raw in text.splitlines():
                 line = raw.strip(" \t-*")
-                if len(line) < 8:
+                if len(line) < 12:
+                    continue
+                # skip markdown headings
+                if line.startswith("#"):
                     continue
                 low = line.lower().replace("ё", "е")
                 if not any(tok in low for tok in tokens):
@@ -520,7 +625,7 @@ class Assistant:
                     break
             if not candidates:
                 compact = re.sub(r"\s+", " ", text.replace("\n", " ")).strip()
-                if compact:
+                if compact and not compact.startswith("#"):
                     low = compact.lower().replace("ё", "е")
                     if any(tok in low for tok in tokens) and (
                         (" это " in low) or ("- это" in low) or ("— это" in low)
@@ -558,6 +663,14 @@ class Assistant:
         started = datetime.now(timezone.utc)
         meta = {"channel": channel, **(metadata or {})}
 
+        # Extract / update user profile
+        profile = load_profile(conversation_key)
+        extracted = UserProfileExtractor.extract(user_text)
+        if extracted:
+            profile.update(extracted)
+            save_profile(conversation_key, profile)
+        profile_text = "\n".join(f"- {k}: {v}" for k, v in profile.items()) if profile else ""
+
         # Retrieval
         history_for_retrieval = self.get_recent_user_context(conversation_key)
         retrieval_query = user_text
@@ -574,8 +687,12 @@ class Assistant:
         self.log_received(user_text, conversation_key, best_score, meta)
         self.record_question_if_new(user_text, conversation_key, best_score)
 
-        # Direct definition shortcut
-        direct_answer = self.build_direct_definition_answer(user_text, results)
+        force_model = self.should_use_model(user_text, conversation_key, best_score)
+
+        # Direct definition shortcut (only when we are not forcing model and score is decent)
+        direct_answer = ""
+        if not force_model and best_score >= Config.SIMILARITY_THRESHOLD:
+            direct_answer = self.build_direct_definition_answer(user_text, results)
         if direct_answer:
             self.log_status("direct_definition_from_docs", user_text, conversation_key, best_score, meta)
             self.add_dialog_turn(conversation_key, "user", user_text)
@@ -589,8 +706,8 @@ class Assistant:
                 "metadata": meta,
             }
 
-        # Low match paths
-        if best_score < Config.SIMILARITY_THRESHOLD:
+        # Low match paths (skip if we should use model anyway)
+        if not force_model and best_score < Config.SIMILARITY_THRESHOLD:
             fallback = (
                 self.build_docs_grounded_fallback(user_text, results)
                 if definition_mode
@@ -608,7 +725,7 @@ class Assistant:
                 "metadata": meta,
             }
 
-        if best_score < Config.LOW_CONFIDENCE_MODEL_SCORE:
+        if not force_model and best_score < Config.LOW_CONFIDENCE_MODEL_SCORE:
             fallback = (
                 self.build_docs_grounded_fallback(user_text, results)
                 if definition_mode
@@ -639,6 +756,7 @@ class Assistant:
                 history_text=history_text,
                 docs_text=docs_text,
                 action_results_text=action_results_text,
+                profile_text=profile_text,
             )
             system = Config.BOT_ROLE
             raw_answer = await self.provider.generate(prompt, system=system)

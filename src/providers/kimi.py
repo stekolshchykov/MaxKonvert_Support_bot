@@ -64,8 +64,8 @@ class KimiProvider(ModelProvider):
             resp = await client.chat.completions.create(
                 model=self.model,
                 messages=messages,  # type: ignore[arg-type]
-                temperature=0.3,
-                max_tokens=512,
+                temperature=0.7,
+                max_tokens=1024,
             )
             content = resp.choices[0].message.content or ""
             return content.strip()[: Config.MAX_ANSWER_CHARS]
@@ -86,6 +86,7 @@ class KimiProvider(ModelProvider):
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 1024,
+            "temperature": 0.7,
         }
         if system:
             payload["system"] = system

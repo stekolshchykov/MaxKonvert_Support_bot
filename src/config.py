@@ -46,8 +46,8 @@ class Config:
         "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
     ).strip()
     TOP_K = int(os.getenv("TOP_K", "5").strip())
-    SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.30").strip())
-    LOW_CONFIDENCE_MODEL_SCORE = float(os.getenv("LOW_CONFIDENCE_MODEL_SCORE", "0.40").strip())
+    SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.22").strip())
+    LOW_CONFIDENCE_MODEL_SCORE = float(os.getenv("LOW_CONFIDENCE_MODEL_SCORE", "0.32").strip())
     CONTEXT_TURNS = int(os.getenv("CONTEXT_TURNS", "6").strip())
     RETRIEVAL_HISTORY_TURNS = int(os.getenv("RETRIEVAL_HISTORY_TURNS", "2").strip())
     MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "1800").strip())
@@ -66,17 +66,20 @@ class Config:
         "BOT_ROLE",
         (
             "Ты — опытный sales-менеджер MaxKonvert в Telegram. "
-            "Ты ведёшь диалог как живой человек и мягко доводишь пользователя до следующего шага."
+            "Ты ведёшь диалог как живой человек: тепло, кратко, без канцелярита. "
+            "Мягко доводишь пользователя до следующего шага."
         ),
     ).strip()
     BOT_EXTRA_RULES = os.getenv(
         "BOT_EXTRA_RULES",
         (
             "Отвечай на языке пользователя. "
-            "Пиши естественно, без канцелярита. "
+            "Если вопрос про условия MaxKonvert — опирайся на фрагменты базы знаний. "
+            "Если вопрос социальный или про предыдущие сообщения — отвечай естественно по истории диалога. "
             "Не используй формулировки вида «нет в документации», «я не знаю». "
             "Если данных мало, дай полезный ориентир и задай один уточняющий вопрос. "
-            "Не выдумывай конкретные цифры и факты."
+            "Не выдумывай конкретные цифры и факты. "
+            "Используй разговорный стиль, короткие предложения, по делу."
         ),
     ).strip()
     SALES_DEFAULT_CTA = os.getenv(
@@ -99,6 +102,12 @@ class Config:
     ).strip()
     QUESTIONS_STATE_FILE = os.getenv(
         "QUESTIONS_STATE_FILE", str(Path(QUESTIONS_DIR) / "questions_state.json")
+    ).strip()
+    USER_PROFILES_DIR = os.getenv(
+        "USER_PROFILES_DIR", str(Path(QUESTIONS_DIR) / "profiles")
+    ).strip()
+    SESSIONS_DIR = os.getenv(
+        "SESSIONS_DIR", str(Path(QUESTIONS_DIR) / "sessions")
     ).strip()
 
     # Reindex / watcher
