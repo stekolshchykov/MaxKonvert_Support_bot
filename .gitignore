@@ -1,7 +1,10 @@
 .env
+.venv/
 kb/index/
 kb/questions/*.ndjson
 kb/questions/*.json
 kb/questions/logs/
+data/
+questions/
 __pycache__/
 *.pyc

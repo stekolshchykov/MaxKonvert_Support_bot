@@ -7,7 +7,8 @@ services:
       - .env.docker
     volumes:
       - ${HOST_OLLAMA_DATA_PATH:-./kb/ollama}:/root/.ollama
-    # Keep Ollama internal to compose network to avoid host port conflicts.
+    profiles:
+      - local
 
   ollama-init:
     image: ollama/ollama:latest
@@ -27,6 +28,8 @@ services:
           sleep 2
         done
         OLLAMA_HOST=http://ollama:11434 ollama pull ${OLLAMA_MODEL}
+    profiles:
+      - local
 
   bot:
     build:
@@ -36,9 +39,6 @@ services:
     restart: unless-stopped
     env_file:
       - .env.docker
-    depends_on:
-      ollama-init:
-        condition: service_completed_successfully
     volumes:
       - ${HOST_KB_DOCS_PATH:-./kb/docs}:/app/kb/docs
       - ${HOST_KB_QUESTIONS_PATH:-./kb/questions}:/app/kb/questions
@@ -46,6 +46,22 @@ services:
     ports:
       - "${BOT_HEALTH_PORT:-8081}:8081"
     command: ["python3", "/app/src/bot.py"]
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maxkonvert-api
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    volumes:
+      - ${HOST_KB_DOCS_PATH:-./kb/docs}:/app/kb/docs
+      - ${HOST_KB_QUESTIONS_PATH:-./kb/questions}:/app/kb/questions
+      - ${HOST_KB_INDEX_PATH:-./kb/index}:/app/kb/index
+    ports:
+      - "${API_PORT:-8082}:8082"
+    command: ["uvicorn", "src.api_server:app", "--host", "0.0.0.0", "--port", "8082"]
 
   watcher:
     build:
@@ -55,9 +71,6 @@ services:
     restart: unless-stopped
     env_file:
       - .env.docker
-    depends_on:
-      ollama-init:
-        condition: service_completed_successfully
     volumes:
       - ${HOST_KB_DOCS_PATH:-./kb/docs}:/app/kb/docs
       - ${HOST_KB_QUESTIONS_PATH:-./kb/questions}:/app/kb/questions
@@ -72,9 +85,6 @@ services:
     restart: unless-stopped
     env_file:
       - .env.docker
-    depends_on:
-      ollama-init:
-        condition: service_completed_successfully
     volumes:
       - ${HOST_KB_DOCS_PATH:-./kb/docs}:/app/kb/docs
       - ${HOST_KB_QUESTIONS_PATH:-./kb/questions}:/app/kb/questions
@@ -89,9 +99,6 @@ services:
     restart: unless-stopped
     env_file:
       - .env.docker
-    depends_on:
-      ollama-init:
-        condition: service_completed_successfully
     volumes:
       - ${HOST_KB_DOCS_PATH:-./kb/docs}:/app/kb/docs
       - ${HOST_KB_QUESTIONS_PATH:-./kb/questions}:/app/kb/questions

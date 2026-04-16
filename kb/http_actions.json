@@ -1,0 +1,55 @@
+{
+  "actions": [
+    {
+      "name": "demo_get",
+      "description": "Fetch a demo JSON object from httpbin (safe test endpoint).",
+      "method": "GET",
+      "url": "https://httpbin.org/get",
+      "headers": {
+        "Accept": "application/json"
+      }
+    },
+    {
+      "name": "demo_post",
+      "description": "Send a test POST payload to httpbin and echo it back.",
+      "method": "POST",
+      "url": "https://httpbin.org/post",
+      "headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      "default_body": {
+        "test": true,
+        "source": "maxkonvert-bot"
+      }
+    },
+    {
+      "name": "demo_put",
+      "description": "Send a test PUT update to httpbin.",
+      "method": "PUT",
+      "url": "https://httpbin.org/put",
+      "headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      }
+    },
+    {
+      "name": "demo_delete",
+      "description": "Send a test DELETE request to httpbin.",
+      "method": "DELETE",
+      "url": "https://httpbin.org/delete",
+      "headers": {
+        "Accept": "application/json"
+      }
+    },
+    {
+      "name": "jsonplaceholder_get_post",
+      "description": "Fetch a sample blog post by ID from JSONPlaceholder.",
+      "method": "GET",
+      "url": "https://jsonplaceholder.typicode.com/posts/1",
+      "headers": {
+        "Accept": "application/json"
+      }
+    }
+  ]
+}

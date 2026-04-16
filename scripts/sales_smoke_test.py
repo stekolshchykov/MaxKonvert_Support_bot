@@ -7,19 +7,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from bot import (  # noqa: E402
-    LOW_CONFIDENCE_MODEL_SCORE,
-    TOP_K,
-    SIMILARITY_THRESHOLD,
-    ask_ollama,
-    build_docs_text,
-    build_prompt,
-    build_sales_manager_fallback,
-    contains_unbacked_claims,
-    ensure_index,
-    get_index,
-    is_unknown_answer,
-)
+from assistant import Assistant
+from config import Config
 
 SMOKE_QUESTIONS = [
     "Привет, я хочу запускать трафик. С чего лучше начать?",
@@ -31,25 +20,15 @@ SMOKE_QUESTIONS = [
 ]
 
 
-async def ask_once(question: str) -> tuple[int, float, str]:
+async def ask_once(assistant: Assistant, question: str) -> tuple[int, float, str, str]:
     t0 = time.time()
-    ensure_index()
-    results = get_index().search(question, top_k=TOP_K)
-    best_score = results[0][0] if results else 0.0
-    if best_score < SIMILARITY_THRESHOLD:
-        answer = build_sales_manager_fallback(question, results, low_match=True)
-    elif best_score < LOW_CONFIDENCE_MODEL_SCORE:
-        answer = build_sales_manager_fallback(question, results, low_match=True)
-    else:
-        docs_text = build_docs_text(results)
-        prompt = build_prompt(question, "(история пуста)", docs_text)
-        answer = await ask_ollama(prompt)
-        if not answer or is_unknown_answer(answer) or contains_unbacked_claims(answer, docs_text):
-            answer = build_sales_manager_fallback(
-                question, results, low_match=best_score < 0.35
-            )
+    result = await assistant.process_message(
+        user_text=question,
+        conversation_key="smoke:test",
+        channel="smoke_test",
+    )
     elapsed_ms = int((time.time() - t0) * 1000)
-    return elapsed_ms, best_score, answer
+    return elapsed_ms, result["best_score"], result["answer"], result["route"]
 
 
 def status_text(answer: str) -> str:
@@ -59,12 +38,15 @@ def status_text(answer: str) -> str:
 
 
 async def main() -> int:
+    assistant = Assistant()
+    assistant.ensure_index()
+    print(f"Provider: {assistant.provider.name}  Model: {assistant.provider.model_id}")
     worst = 0
     for i, q in enumerate(SMOKE_QUESTIONS, start=1):
-        ms, score, answer = await ask_once(q)
+        ms, score, answer, route = await ask_once(assistant, q)
         worst = max(worst, ms)
         print(f"[{i}] {q}")
-        print(f"    ms={ms} score={score:.4f} style={status_text(answer)}")
+        print(f"    ms={ms} score={score:.4f} route={route} style={status_text(answer)}")
         print(f"    answer={answer[:420].replace(chr(10), ' ')}")
     print(f"\nWorst latency: {worst} ms")
     return 0
