@@ -75,9 +75,15 @@ curl http://127.0.0.1:${DOCS_EDITOR_PORT:-8090}/health
 - `MODEL_PROVIDER=local | kimi`
 - `OLLAMA_URL` — адрес Ollama (по умолчанию `http://ollama:11434`).
 - `OLLAMA_MODEL` — модель Ollama (`qwen2.5:3b` по умолчанию).
-- `KIMI_API_TOKEN` — токен Moonshot API (обязателен при `MODEL_PROVIDER=kimi`).
-- `KIMI_BASE_URL` — базовый URL Kimi API (`https://api.moonshot.cn/v1`).
-- `KIMI_MODEL` — идентификатор модели Kimi (`moonshot-v1-8k`).
+- `KIMI_API_TOKEN` — токен Kimi / Moonshot (обязателен при `MODEL_PROVIDER=kimi`).
+- `KIMI_BASE_URL` — базовый URL Kimi API:
+  - **Kimi Code** (`sk-kimi-...`): `https://api.kimi.com/coding/v1`
+  - **Moonshot Open Platform** (`sk-...`): `https://api.moonshot.cn/v1` (Китай) или `https://api.moonshot.ai/v1` (международный)
+- `KIMI_MODEL` — идентификатор модели:
+  - Для Kimi Code: `kimi-for-coding`
+  - Для Moonshot: `moonshot-v1-8k`, `kimi-k2.5` и т.д.
+
+> **Важно:** токены **Kimi Code** (`sk-kimi-...`) и **Moonshot Open Platform** используют разные endpoint'ы и форматы. Kimi Code работает через **Anthropic-compatible** Messages API (`/messages`), а Moonshot — через **OpenAI-compatible** Chat Completions API (`/chat/completions`). Система автоматически определяет правильный режим по префиксу токена или base URL.
 
 ### Telegram
 - `TELEGRAM_TOKEN` — токен Telegram-бота.
