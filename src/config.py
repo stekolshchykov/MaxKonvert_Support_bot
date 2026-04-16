@@ -23,7 +23,7 @@ class Config:
     ACTIONS_CONFIG_PATH = os.getenv("ACTIONS_CONFIG_PATH", str(ROOT_DIR / "kb" / "http_actions.json")).strip()
 
     # Telegram
-    TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
+    TELEGRAM_TOKEN = (os.getenv("TELEGRAM_TOKEN", "") or os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()
     TELEGRAM_BOT_URL = os.getenv("TELEGRAM_BOT_URL", "").strip()
 
     # Model provider selection

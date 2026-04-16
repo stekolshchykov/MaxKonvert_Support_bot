@@ -23,7 +23,7 @@ if APP_ENV_FILE:
     load_dotenv(APP_ENV_FILE, override=True)
 
 # Telegram-specific env (kept here for backward compatibility)
-TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
+TOKEN = (os.getenv("TELEGRAM_TOKEN", "") or os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").strip()
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b").strip()
 BOT_HEALTH_HOST = os.getenv("BOT_HEALTH_HOST", "0.0.0.0").strip()
@@ -118,14 +118,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = conversation_key(update)
     metadata = build_telegram_metadata(update)
 
-    result = await assistant.process_message(
-        user_text=user_text,
-        conversation_key=key,
-        channel="telegram",
-        metadata=metadata,
-    )
-
-    await update.effective_message.reply_text(result["answer"])
+    try:
+        result = await assistant.process_message(
+            user_text=user_text,
+            conversation_key=key,
+            channel="telegram",
+            metadata=metadata,
+        )
+        await update.effective_message.reply_text(result["answer"])
+    except Exception:
+        logger.exception("Error handling message from key=%s", key)
+        await update.effective_message.reply_text(
+            "Извините, не удалось обработать запрос. Попробуйте ещё раз через пару секунд."
+        )
 
 
 def main():
